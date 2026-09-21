@@ -2,7 +2,7 @@
 """Read and summarize ROS 2 PointCloud2 messages stored in SQLite3 bags.
 
 The script intentionally avoids ROS imports so that the supplied bags can be
-checked on Windows before the Ubuntu/ROS 2 Docker environment is available.
+checked on Windows and consumed directly by the local web application.
 It supports CDR-serialized sensor_msgs/msg/PointCloud2 messages and writes a
 JSON report suitable for comparing the two topic/frame variants in the data.
 """
