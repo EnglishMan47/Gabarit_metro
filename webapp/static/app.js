@@ -216,7 +216,7 @@ function render(frame) {
   const railCoverage = `${(frame.path_coverage * 100).toFixed(0)}%${frame.diagnostics.path_fallback_used ? " · резерв" : ""}`;
   elements.analysisMeta.innerHTML = [
     diagnosticCard("Обработка", backendName, "accent", fallbackName || "Фактически используемый способ обработки"),
-    diagnosticCard("Нейросеть", modelTime),
+    diagnosticCard("Нейросеть", modelTime, "", "Диагностический слой; не меняет решение о тревоге"),
     diagnosticCard("Покрытие пола", `${(frame.floor_coverage * 100).toFixed(0)}%`),
     diagnosticCard("Рельсы", railCoverage, frame.diagnostics.path_fallback_used ? "warning" : ""),
     diagnosticCard("Исходных точек", frame.raw_point_count.toLocaleString("ru-RU")),
