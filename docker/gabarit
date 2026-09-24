@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Gabarit command line inside the container.
+set -e
+CFG=${GABARIT_CONFIG:-/opt/gabarit/config/gabarit.yaml}
+DATA=${GABARIT_DATA:-/data}
+cmd=${1:-detect}; shift || true
+
+find_bag() {  # accept a bag directory, a .db3 file or a bag name under $DATA
+  local b="$1"
+  if [ -z "$b" ]; then ls -d "$DATA"/*/ 2>/dev/null | head -n1; return; fi
+  if [ -e "$b" ]; then echo "$b"; return; fi
+  if [ -e "$DATA/$b" ]; then echo "$DATA/$b"; return; fi
+  find "$DATA" -maxdepth 3 -type d -name "$b" | head -n1
+}
+
+case "$cmd" in
+  detect)   # ROS 2 node; web UI (live) on :8080
+    exec ros2 launch gabarit_ros gabarit.launch.py config:="$CFG" "$@" ;;
+  demo)     # node + ros2 bag play of one bag; open http://localhost:8080
+    BAG=$(find_bag "$1"); shift || true
+    [ -n "$BAG" ] || { echo "bag not found (mount the dataset to $DATA)"; exit 1; }
+    if [ "${GABARIT_COPY:-0}" = "1" ]; then   # slow bind mounts (Docker Desktop on Windows/macOS)
+      echo ">>> copying $BAG into the container..."
+      cp -r "$BAG" /tmp/bag && BAG=/tmp/bag
+    fi
+    ros2 launch gabarit_ros gabarit.launch.py config:="$CFG" &
+    NODE=$!
+    sleep 4
+    echo ">>> ros2 bag play $BAG   (web: http://localhost:8080)"
+    ros2 bag play "$BAG" "$@" || true
+    sleep 2
+    kill $NODE 2>/dev/null || true ;;
+  play)     # only play a bag (use together with `detect` in another container/shell)
+    BAG=$(find_bag "$1"); shift || true
+    exec ros2 bag play "$BAG" "$@" ;;
+  web)      # standalone playback UI without ROS on :8000
+    exec python3 -m web.server --data "$DATA" --config "$CFG" --host 0.0.0.0 --port 8000 "$@" ;;
+  evaluate) # batch evaluation of all bags -> /output
+    exec python3 scripts/evaluate.py "$DATA" --config "$CFG" --out /output/eval "$@" ;;
+  synthetic) # detection range with synthetic obstacles -> /output
+    exec python3 scripts/synthetic_eval.py "$DATA" --config "$CFG" --out /output/synthetic "$@" ;;
+  test)
+    exec python3 -m pytest -q tests "$@" ;;
+  help|--help|-h)
+    sed -n '2,30p' /opt/gabarit/docker/USAGE.txt ;;
+  *) exec "$cmd" "$@" ;;
+esac

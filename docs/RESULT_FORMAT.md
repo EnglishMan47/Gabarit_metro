@@ -1,49 +1,55 @@
-# Формат результата детектора
+# Формат результата
 
-Версия контракта: `metro-lidar-evaluation-v1`. Все расстояния указаны в метрах, время обработки — в миллисекундах, временные метки bag — в наносекундах.
+## Топики ROS 2
 
-## HTTP-ответ кадра
+| Топик | Тип | Содержание |
+|---|---|---|
+| `/gabarit/obstacle` | `std_msgs/Bool` | `true` — впереди подтверждённое препятствие, нужно тормозить |
+| `/gabarit/distance` | `std_msgs/Float32` | расстояние до ближайшего препятствия, м (`NaN`, если путь свободен) |
+| `/gabarit/free_distance` | `std_msgs/Float32` | путь проверен и свободен до этого расстояния, м |
+| `/gabarit/status` | `std_msgs/String` | полный JSON-результат кадра (ниже) |
+| `/gabarit/markers` | `visualization_msgs/MarkerArray` | габарит, ось пути, рамки и подписи препятствий для RViz2 |
+| `/gabarit/obstacle_points` | `sensor_msgs/PointCloud2` | точки подтверждённых препятствий |
 
-`GET /api/frame?bag=<id>&index=<n>` возвращает:
+Все геометрические выходы — в системе координат входного облака (`header.frame_id`).
 
-- `raw_detected` — в текущем кадре есть хотя бы один геометрический кандидат;
-- `event_detected` и `obstacle_detected` — кандидат подтверждён временным трекером;
-- `nearest_distance_m` — расстояние до ближайшей видимой поверхности сырого кандидата;
-- `event_nearest_distance_m` — ближайшее расстояние по последним наблюдениям активных подтверждённых треков; при кратком пропуске используется последнее измерение;
-- `objects` — объекты с `track_id`, центром, bbox, размерами, числом точек, высотой над полом, долей совпадения с фоном и причинами;
-- `floor_profile` — локальная высота пола по продольным сегментам;
-- `path_profile` — центр коридора и распознанные рельсы по сегментам;
-- `active_tracks` — состояние временных треков;
-- `diagnostics` — причины удаления кластеров и признаки резервной геометрии;
-- `points` — прореженное облако только для визуализации.
-
-Пример объекта:
+## JSON кадра (`/gabarit/status`, веб-интерфейс, `scripts/evaluate.py`)
 
 ```json
 {
-  "track_id": 3,
-  "track_confirmed": true,
-  "point_count": 184,
-  "distance_surface_m": 54.91,
-  "center_m": {"x": 0.31, "forward": 55.62, "z": -1.71},
-  "min_m": {"x": -0.12, "forward": 55.31, "z": -2.18},
-  "max_m": {"x": 0.72, "forward": 55.94, "z": -0.72},
-  "height_above_floor_m": {"min": 0.12, "max": 1.58},
-  "background_fraction": 0.08,
-  "reasons": ["compact_cluster", "above_floor", "background_deviation"]
+  "frame": 57,
+  "stamp": 1788354628.81,
+  "status": "OBSTACLE",              // CLEAR | CHECK | OBSTACLE | DEGRADED
+  "obstacle": true,
+  "nearest_distance_m": 55.6,        // евклидово расстояние от лидара до ближайшей точки объекта
+  "nearest_track_distance_m": 55.5,  // вдоль пути
+  "free_distance_m": 55.5,           // до препятствия или до конца проверенного пути
+  "observed_until_m": 107.0,         // путь подтверждён измерениями до
+  "speed_kmh": 0.0,                  // скорость поезда по лидару
+  "stopping_distance_m": 0.0,        // тормозной путь (реакция 1,5 с, замедление 1,1 м/с²), справочно
+  "time_to_obstacle_s": null,
+  "turnout_ahead_m": null,           // распознанная впереди стрелка (маршрут на ней не определён)
+  "obstacles": [{
+    "track_id": 3, "confirmed": true,
+    "distance_m": 55.6, "s_m": 55.5, "lateral_m": 0.35,
+    "box": {"s": [55.5, 55.9], "d": [0.1, 0.6], "h": [0.18, 1.55]},  // вдоль пути / поперёк / над головкой рельса
+    "size_m": [0.4, 0.5, 1.37],
+    "points": 112, "rings": 12,
+    "low": false,                    // true — низкий объект на рельсе
+    "confidence": 0.98,
+    "first_seen_m": 55.7,            // на каком расстоянии объект впервые стал кандидатом
+    "confirmed_at_m": 55.6,
+    "reasons": ["112 точек на 12 лучах"]
+  }],
+  "pending": [],                     // кандидаты, ещё не подтверждённые (статус CHECK)
+  "candidates": [ ... ],             // все кластеры кадра с причиной отбраковки ("rejected")
+  "calibration": {"height_m": 1.48, "pitch_deg": -0.9, "roll_deg": -3.5, "valid": true},
+  "timing_ms": {"decode": 20.1, "track": 30.2, "egomotion": 2.4, "detect": 14.9, "tracking": 0.1, "total": 67.7}
 }
 ```
 
-## Пакетная оценка
+`scripts/evaluate.py` сохраняет такие записи построчно (`frames/<bag>.jsonl`) и сводку по записям (`summary.json`: кадры с тревогой, события, задержки p50/p95).
 
-Команда:
+## Журнал оператора
 
-```powershell
-python scripts/evaluate_detector.py --step 1
-```
-
-создаёт `artifacts/evaluation/final-summary.json` и по одному JSONL-файлу на bag в `artifacts/evaluation/final-frames/`. Каждая строка JSONL самодостаточна и содержит номер кадра, временную метку, сырую и устойчивую тревогу, расстояние, времена обработки, объекты и диагностику.
-
-## Обратная связь оператора
-
-`POST /api/feedback` принимает `bag`, `frame_index`, `decision` (`confirmed` или `dismissed`), необязательные `nearest_distance_m` и `comment`. Записи добавляются в `artifacts/operator_feedback.jsonl`. `GET /api/export?format=json` и `format=csv` возвращают журнал для выгрузки.
+Решения оператора в веб-интерфейсе («Подтвердить» / «Ложная тревога») пишутся в `artifacts/operator_journal.jsonl` и выгружаются в CSV (`/api/journal.csv`): время, запись, кадр, номер трека, решение, расстояние, смещение, высота, признак испытательного объекта.

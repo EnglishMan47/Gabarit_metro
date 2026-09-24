@@ -1,0 +1,75 @@
+# Gabarit detector configuration. Every value is optional: missing keys keep
+# the defaults from gabarit/config.py. Main parameters:
+#   envelope.width / height   - clearance envelope (Q&A: 2.2 x 3.0 m)
+#   envelope.min_height       - lower limit above the rail head
+#   sensor.forward_axis       - axis of the cloud pointing forward ("-y" for the provided bags)
+#   sensor.auto_calibration   - estimate lidar height/pitch/roll from the rails
+#   tracking.confirm_hits     - frames needed to confirm an obstacle (near field)
+#   detection.max_range       - analysis horizon, m
+sensor:
+  forward_axis: -y
+  auto_calibration: true
+  default_height: 1.1
+  default_pitch_deg: 0.0
+  default_roll_deg: 0.0
+  default_yaw_deg: 0.0
+  default_lateral: 0.0
+  calibration_alpha: 0.15
+  min_range: 1.0
+track:
+  gauge: 1.6
+  gauge_tolerance: 0.1
+  rail_min_prominence: 0.06
+  rail_search_max: 60.0
+  start: 3.0
+  horizon: 200.0
+  near_step: 1.0
+  far_step: 2.0
+  near_far_switch: 40.0
+  wall_band:
+  - 0.3
+  - 2.5
+  wall_min_offset: 1.15
+  wall_window: 0.35
+  wall_lost_after: 12.0
+  curvature_noise: 0.00015
+  temporal_weight: 0.6
+  smooth_lateral: 3000000.0
+  smooth_vertical: 30000000.0
+envelope:
+  width: 2.2
+  height: 3.0
+  min_height: 0.12
+  lateral_margin: 0.0
+  edge_zone: 0.25
+detection:
+  max_range: 200.0
+  voxel_near: 0.25
+  voxel_growth: 0.004
+  min_points: 4
+  min_rings: 2
+  min_height_extent: 0.1
+  min_score: 0.5
+  ground_margin: 0.12
+  ceiling_margin: 0.35
+  wall_attach_margin: 0.35
+  max_clusters: 32
+  low_max_height: 0.45
+  low_max_range: 80.0
+  low_max_lateral: 0.95
+  low_min_points: 3
+tracking:
+  gate: 2.0
+  lateral_gate: 0.8
+  confirm_hits: 3
+  confirm_window: 4
+  drop_misses: 4
+  low_confirm_hits: 6
+  low_confirm_window: 8
+  far_distance: 60.0
+  far_confirm_hits: 6
+  far_confirm_window: 8
+  far_lateral_std: 0.3
+  max_speed: 25.0
+braking_deceleration: 1.1
+reaction_time: 1.5

@@ -11,3 +11,5 @@ __pycache__/
 .env
 Pandar128E3X_v4p5_User_Manual_128-en-240710-1.pdf
 Заметики по хакатону.txt
+*.out
+.pytest_cache/

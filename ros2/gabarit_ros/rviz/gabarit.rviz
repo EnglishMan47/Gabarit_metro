@@ -1,0 +1,48 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Plane Cell Count: 40
+      Cell Size: 5
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Lidar
+      Enabled: true
+      Topic:
+        Value: /lidar_points
+        Reliability Policy: Best Effort
+      Size (Pixels): 2
+      Style: Points
+      Color Transformer: Intensity
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Obstacle points
+      Enabled: true
+      Topic:
+        Value: /gabarit/obstacle_points
+      Size (Pixels): 6
+      Style: Points
+      Color Transformer: FlatColor
+      Color: 255; 40; 40
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Envelope and obstacles
+      Enabled: true
+      Topic:
+        Value: /gabarit/markers
+  Global Options:
+    Fixed Frame: hesai_lidar
+    Background Color: 12; 16; 22
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 40
+      Pitch: 0.35
+      Yaw: 1.57
+      Focal Point:
+        X: 0
+        Y: -30
+        Z: 0

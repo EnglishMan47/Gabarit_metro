@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Габарит — контроль пути по лидару</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='3' width='24' height='26' rx='5' fill='none' stroke='%2322c55e' stroke-width='3'/%3E%3Cpath d='M10 24 L16 8 L22 24' fill='none' stroke='%2322c55e' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/styles.css">
+<script type="importmap">
+{ "imports": { "three": "/static/vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" class="logo"><rect x="4" y="3" width="24" height="26" rx="5"/><path d="M10 24 L16 8 L22 24"/></svg>
+    <div>
+      <div class="brand-name">ГАБАРИТ</div>
+      <div class="brand-sub">контроль пути беспилотного поезда · 3D-лидар</div>
+    </div>
+  </div>
+  <div class="transport" id="transport">
+    <select id="bagSelect" title="Запись проезда (ROS 2 bag)"></select>
+    <button class="icon" id="btnPrev" title="Кадр назад (←)">&#9664;&#9664;</button>
+    <button class="icon primary" id="btnPlay" title="Воспроизвести / пауза (пробел)">&#9654;</button>
+    <button class="icon" id="btnNext" title="Кадр вперёд (→)">&#9654;&#9654;</button>
+    <select id="speedSelect" title="Скорость воспроизведения">
+      <option value="0.25">×0.25</option><option value="0.5">×0.5</option>
+      <option value="1" selected>×1 реальное время</option><option value="2">×2</option><option value="5">×5 максимум</option>
+    </select>
+    <div class="framebox"><span id="frameLabel">—</span><span id="timeLabel"></span></div>
+  </div>
+  <div class="live-badge hidden" id="liveBadge"><span class="dot"></span>LIVE · ROS 2</div>
+  <div class="conn" id="conn" title="Соединение с сервером">●</div>
+</header>
+
+<main class="layout">
+  <section class="viewport" id="viewport">
+    <canvas id="scene"></canvas>
+    <div class="hud-status" id="hudStatus">
+      <div class="hud-state" id="hudState">ОЖИДАНИЕ</div>
+      <div class="hud-detail" id="hudDetail">выберите запись и нажмите ▶</div>
+    </div>
+    <div class="cams" id="cams">
+      <button data-cam="cab" class="active" title="Вид из кабины (1)">Кабина</button>
+      <button data-cam="chase" title="Сзади сверху (2)">Сзади</button>
+      <button data-cam="top" title="Вид сверху (3)">Сверху</button>
+      <button data-cam="side" title="Вид сбоку (4)">Сбоку</button>
+      <button data-cam="target" title="К препятствию (5)">К цели</button>
+      <button data-cam="free" title="Свободная камера (мышь)">Свободно</button>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--pt-other)"></i>тоннель</span>
+      <span><i style="background:var(--pt-ground)"></i>путь</span>
+      <span><i style="background:var(--pt-env)"></i>в габарите</span>
+      <span><i style="background:var(--warn)"></i>проверка</span>
+      <span><i style="background:var(--bad)"></i>препятствие</span>
+      <span><i style="background:var(--synth)"></i>испытательный объект</span>
+    </div>
+    <div class="toast hidden" id="toast">
+      <div class="toast-title">Обнаружено препятствие</div>
+      <div class="toast-body" id="toastBody"></div>
+      <div class="toast-actions">
+        <button class="ok" id="toastConfirm">Подтвердить</button>
+        <button class="no" id="toastReject">Ложная тревога</button>
+        <button class="later" id="toastLater">Позже</button>
+      </div>
+    </div>
+    <canvas id="radar" class="radar" title="Схема пути: 0–200 м"></canvas>
+  </section>
+
+  <aside class="panel">
+    <div class="status-card state-idle" id="statusCard">
+      <div class="status-label" id="statusLabel">НЕТ ДАННЫХ</div>
+      <div class="status-main" id="statusMain">—</div>
+      <div class="status-sub" id="statusSub">расстояние до ближайшего препятствия</div>
+    </div>
+    <div class="metrics">
+      <div class="metric"><span class="m-val" id="mSpeed">—</span><span class="m-lab">скорость, км/ч</span></div>
+      <div class="metric"><span class="m-val" id="mFree">—</span><span class="m-lab">свободно, м</span></div>
+      <div class="metric"><span class="m-val" id="mStop">—</span><span class="m-lab">тормозной путь, м</span></div>
+      <div class="metric"><span class="m-val" id="mTtc">—</span><span class="m-lab">до препятствия, с</span></div>
+      <div class="metric"><span class="m-val" id="mLat">—</span><span class="m-lab">обработка, мс</span></div>
+      <div class="metric"><span class="m-val" id="mFps">—</span><span class="m-lab">кадров/с</span></div>
+    </div>
+
+    <div class="obstacles" id="obstacles"></div>
+
+    <nav class="tabs" id="tabs">
+      <button data-tab="test" class="active">Испытание</button>
+      <button data-tab="layers">Слои</button>
+      <button data-tab="params">Параметры</button>
+      <button data-tab="perf">Скорость</button>
+      <button data-tab="log">Журнал</button>
+    </nav>
+
+    <div class="tab" id="tab-test">
+      <p class="hint">Поставьте на путь виртуальный объект: он встраивается в облако трассировкой лучей лидара (с затенением тоннеля) и должен быть найден детектором. Можно также щёлкнуть по коридору в 3D-сцене с зажатым <kbd>Shift</kbd>.</p>
+      <label>Объект
+        <select id="synShape">
+          <option value="person">Человек (1,75 м)</option>
+          <option value="child">Ребёнок (1,2 м)</option>
+          <option value="box_50cm">Ящик 0,5×0,5×0,5 м</option>
+          <option value="box_30cm">Предмет 0,3×0,3×0,1 м на рельсе</option>
+          <option value="barrel">Бочка 0,6×0,9 м</option>
+          <option value="trolley">Тележка 1,4×1,0×1,0 м</option>
+          <option value="cable">Свисающий кабель</option>
+        </select>
+      </label>
+      <label>Расстояние: <b id="synDistVal">120</b> м
+        <input type="range" id="synDist" min="15" max="200" value="120" step="1">
+      </label>
+      <label>Смещение от оси: <b id="synLatVal">0.0</b> м
+        <input type="range" id="synLat" min="-1.5" max="1.5" value="0" step="0.1">
+      </label>
+      <div class="row">
+        <button class="primary" id="synAdd">Поставить объект</button>
+        <button id="synClear">Убрать все</button>
+      </div>
+      <div id="synList" class="synlist"></div>
+    </div>
+
+    <div class="tab hidden" id="tab-layers">
+      <label class="check"><input type="checkbox" data-layer="points" checked> Облако точек</label>
+      <label class="check"><input type="checkbox" data-layer="envelope" checked> Габарит (коридор)</label>
+      <label class="check"><input type="checkbox" data-layer="path" checked> Ось пути и рельсы</label>
+      <label class="check"><input type="checkbox" data-layer="walls"> Отслеживаемые стены</label>
+      <label class="check"><input type="checkbox" data-layer="markers" checked> Отметки дальности</label>
+      <label class="check"><input type="checkbox" data-layer="boxes" checked> Рамки объектов</label>
+      <label class="check"><input type="checkbox" data-layer="candidates"> Отклонённые кандидаты</label>
+      <label>Раскраска облака
+        <select id="colorMode">
+          <option value="class">по назначению</option>
+          <option value="height">по высоте</option>
+          <option value="intensity">по интенсивности</option>
+        </select>
+      </label>
+      <label>Размер точек <input type="range" id="pointSize" min="1" max="5" step="0.5" value="2"></label>
+      <label class="check"><input type="checkbox" id="soundOn"> Звуковой сигнал тревоги</label>
+    </div>
+
+    <div class="tab hidden" id="tab-params">
+      <p class="hint">Параметры применяются к текущему проезду сразу (детектор перезапускается с прогревом).</p>
+      <label>Режим
+        <select id="preset">
+          <option value="balanced" selected>Сбалансированный</option>
+          <option value="strict">Строгий — минимум ложных тревог</option>
+          <option value="sensitive">Чувствительный — раннее обнаружение</option>
+        </select>
+      </label>
+      <label>Ширина габарита: <b id="pWidthVal">2.2</b> м
+        <input type="range" id="pWidth" min="1.8" max="3.2" step="0.1" value="2.2"></label>
+      <label>Высота габарита: <b id="pHeightVal">3.0</b> м
+        <input type="range" id="pHeight" min="2.0" max="4.0" step="0.1" value="3.0"></label>
+      <label>Нижняя граница над головкой рельса: <b id="pMinHVal">0.12</b> м
+        <input type="range" id="pMinH" min="0.05" max="0.4" step="0.01" value="0.12"></label>
+      <label>Предел анализа: <b id="pRangeVal">200</b> м
+        <input type="range" id="pRange" min="60" max="200" step="10" value="200"></label>
+      <div class="row"><button class="primary" id="pApply">Применить</button><button id="pReset">Сбросить</button></div>
+      <div class="calib" id="calibBox"></div>
+    </div>
+
+    <div class="tab hidden" id="tab-perf">
+      <div class="perf" id="perfBars"></div>
+      <canvas id="perfChart" class="perfchart"></canvas>
+      <p class="hint">Время по этапам одного кадра на сервере: декодирование PointCloud2, самокалибровка и оценка пути, эго-движение, поиск кандидатов, подтверждение треков. Цель — не более 100 мс (поток лидара 10 Гц).</p>
+    </div>
+
+    <div class="tab hidden" id="tab-log">
+      <div class="row"><button id="logRefresh">Обновить</button><a class="btn" href="/api/journal.csv" download>Экспорт CSV</a></div>
+      <div class="journal" id="journal"></div>
+    </div>
+  </aside>
+</main>
+
+<footer class="timeline-wrap">
+  <div class="tl-head">
+    <span class="tl-title">Проезд</span>
+    <button id="btnScan" title="Прогнать детектор по всей записи и отметить события">Анализ всего проезда</button>
+    <span id="scanState" class="scan-state"></span>
+    <div class="tl-events" id="tlEvents"></div>
+  </div>
+  <canvas id="timeline" class="timeline"></canvas>
+</footer>
+
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

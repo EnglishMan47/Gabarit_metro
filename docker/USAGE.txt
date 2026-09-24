@@ -1,0 +1,10 @@
+Gabarit container commands (docker run ... gabarit <command>):
+  detect            ROS 2 node, subscribes to every PointCloud2 topic, publishes /gabarit/*,
+                    live web UI on http://localhost:8080 (default command)
+  demo [bag]        detect + `ros2 bag play <bag>` in one container
+  play <bag>        only `ros2 bag play`
+  web               playback web UI without ROS on http://localhost:8000 (seek, synthetic obstacles)
+  evaluate          run the detector over all bags in /data, results to /output/eval
+  synthetic         detection range with ray-cast synthetic obstacles, results to /output/synthetic
+  test              unit tests
+Data: mount the directory with bags to /data, results: mount a directory to /output.

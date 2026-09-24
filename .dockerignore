@@ -1,0 +1,17 @@
+.git
+.venv
+.models
+data
+датасет
+датасет.zip
+artifacts
+private
+webapp
+ml
+models
+annotations
+*.mp4
+*.pdf
+*.zip
+**/__pycache__
+.claude
