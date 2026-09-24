@@ -223,6 +223,11 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
         low_zone = (cand.h_max < det.low_max_height and cand.s_near <= min(track.rail_until + 8.0, det.low_max_range)
                     and float(np.abs(di).max()) < det.low_max_lateral)
         cand.low = bool(low_zone)
+        # a compact body filling a large part of the envelope cross-section:
+        # vault fixtures never reach a metre down into the envelope over a
+        # metre of its width, so the ceiling rules do not apply to it
+        massive = (cand.d_max - cand.d_min >= 0.8 and cand.h_min <= env.height - 1.0
+                   and cand.h_max - cand.h_min >= 0.8 and cand.s_far - cand.s_near <= 1.5)
         # --- rejections: normal tunnel leaking into the envelope
         if low_zone and n_in >= det.low_min_points and float(np.abs(d_all).max()) < half + 0.2:
             pass
@@ -247,7 +252,7 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
             # continuous from the ballast up to the vault: a column / pillar of a
             # double-track tunnel or a station; nothing movable is 4 m tall
             cand.rejected = "column"
-        elif top_all > env.height + 0.5 and cand.h_max > env.height - 0.4 and cand.s_near > 60.0:
+        elif top_all > env.height + 0.5 and cand.h_max > env.height - 0.4 and cand.s_near > 60.0 and not massive:
             # hanging from the vault far away, where the path is uncertain
             cand.rejected = "ceiling_attached"
         if cand.rejected is None and _longitudinal(s, d, h, members, cand, half):

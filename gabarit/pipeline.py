@@ -143,7 +143,8 @@ class Pipeline:
             if c.point_index is not None:
                 labels[c.point_index] = CLS_CANDIDATE if c.rejected is None else CLS_ENVELOPE
         for t in confirmed:
-            if t.cand.point_index is not None:
+            # a track held through a dropout keeps the indices of an older frame
+            if t.misses == 0 and t.cand.point_index is not None:
                 labels[t.cand.point_index] = CLS_OBSTACLE
 
         data = {

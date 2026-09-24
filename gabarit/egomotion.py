@@ -72,6 +72,7 @@ class EgoMotion:
         self.initialised = False
         self.last_shift = 0.0
         self.quality = 0.0
+        self.disagree = 0
 
     def reset(self) -> None:
         self.__init__(self.max_speed)
@@ -98,6 +99,18 @@ class EgoMotion:
         else:
             pen = 0.0
         k = int(np.argmax(sc - pen))
+        # the motion prior must not lock the filter on a wrong speed: when the
+        # data alone clearly prefer another shift for several frames running,
+        # the uncertainty is reset and the filter re-acquires the motion
+        k_raw = int(np.argmax(sc))
+        if self.initialised and sc[k_raw] > 0.35 and sc[k_raw] - sc[k] > 0.1:
+            self.disagree += 1
+            if self.disagree >= 3:
+                self.P = 25.0
+                k = k_raw
+                self.disagree = 0
+        else:
+            self.disagree = 0
         best = sc[k]
         sh = float(shifts[k])
         if 0 < k < len(sc) - 1 and np.isfinite(sc[k - 1]) and np.isfinite(sc[k + 1]):
