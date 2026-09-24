@@ -381,6 +381,27 @@ class TrackModel:
         sc = np.interp(f, self.s, self.sig_c)
         return c, z, sc
 
+    def wall_offset(self, s: float, side: int, extend: float = 15.0) -> float | None:
+        """Lateral position of the tracked wall relative to the centre line at
+        distance ``s`` (left > 0, right < 0); the wall is continued along its
+        last 10 m for up to ``extend`` metres past its last observation."""
+        w = self.wall_left if side > 0 else self.wall_right
+        ok = np.isfinite(w)
+        if not ok.any():
+            return None
+        ws, wv = self.s[ok], w[ok]
+        if s < ws[0]:
+            return None
+        if s <= ws[-1]:
+            x = float(np.interp(s, ws, wv))
+        elif s - ws[-1] <= extend:
+            tail = ws > ws[-1] - 10.0
+            slope = float(np.polyfit(ws[tail], wv[tail], 1)[0]) if tail.sum() >= 3 else 0.0
+            x = float(wv[-1] + slope * (s - ws[-1]))
+        else:
+            return None
+        return x - float(np.interp(s, self.s, self.c))
+
     def public(self, step: int = 1) -> dict:
         sl = slice(None, None, step)
         return {
@@ -504,13 +525,17 @@ class TrackEstimator:
         return np.full(n, self.cfg.sensor.default_lateral)
 
     @staticmethod
-    def _fuse_walls(meas: list, ctr: "_KF", prior: float | None, bad: dict, woff: dict, lin: float | None = None):
+    def _fuse_walls(meas: list, ctr: "_KF", prior: float | None, bad: dict, woff: dict, lin: float | None = None,
+                    drift_scale: float = 1.0):
         """Gate the wall-implied centre positions of one slice.
 
         The path bends smoothly, whereas a wall can jump (niche, platform end,
         change of the tunnel section). A side whose implied centre jumps away
         from the prediction is rejected; if that persists while the other side
         still agrees, its offset is re-anchored instead of bending the path.
+        A smooth drift of the walls away from the path is the opposite case: the
+        curve of the path is wrong, and the walls bend it (``drift_scale``
+        inflates their variance close to the rails, which fix the path there).
         """
         if not meas:
             return []
@@ -523,16 +548,34 @@ class TrackEstimator:
             (ok if abs(z - ref) < gate else rej).append((z, var, side, y))
         for z, var, side, y in ok:
             bad[side] = 0
+        drift = []
         for z, var, side, y in rej:
             bad[side] += 1
-            other_fine = bool(ok) or len(meas) == 1
-            if bad[side] >= 3 and other_fine:
+            if bad[side] >= 3 and ok:
+                # the other wall confirms the path: this side jumped
                 woff[side] = [side * (y - pred)]
                 bad[side] = 0
-        if not ok and len(rej) == 2 and min(bad.values()) >= 5:
-            for z, var, side, y in rej:
-                woff[side] = [side * (y - pred)]
-                bad[side] = 0
+            elif bad[side] >= 3 and len(meas) == 1:
+                if abs(z - ref) < 0.6:
+                    # the only wall drifts away smoothly and persistently: the
+                    # curve of the path is wrong, not the wall (a niche or a
+                    # platform end is a jump); the wall bends the path
+                    drift.append((z, 4.0 * drift_scale * var, side, y))
+                else:
+                    woff[side] = [side * (y - pred)]
+                    bad[side] = 0
+        if not ok and len(rej) == 2:
+            (z1, v1, s1, y1), (z2, v2, s2, y2) = rej
+            if abs(z1 - z2) < 0.35 and min(bad.values()) >= 2:
+                # both walls agree with each other and not with the path: a
+                # curve sharper / gentler than predicted
+                drift.append((0.5 * (z1 + z2), 2.0 * drift_scale * max(v1, v2), 2, 0.0))
+            elif min(bad.values()) >= 5:
+                for z, var, side, y in rej:
+                    woff[side] = [side * (y - pred)]
+                    bad[side] = 0
+        if drift:
+            return [(z, var, side) for z, var, side, y in drift]
         if len(ok) == 2 and abs(ok[0][0] - ok[1][0]) < 0.35:
             return [(0.5 * (ok[0][0] + ok[1][0]), 0.5 * max(ok[0][1], ok[1][1]), 2)]
         if len(ok) == 2:
@@ -757,7 +800,9 @@ class TrackEstimator:
                     bad_side[other[2]] += 1
                     if abs(best[0] - ctr.X[0]) < max(1.0, 3 * ctr.sig):
                         lat_meas = [best]
-                for zc, var, side in self._fuse_walls(lat_meas, ctr, pc_i, bad_side, woff, lin):
+                gap = sm - anchor[0] if anchor is not None else 99.0
+                scale = float(np.interp(gap, (20.0, 40.0), (4.0, 1.0)))
+                for zc, var, side in self._fuse_walls(lat_meas, ctr, pc_i, bad_side, woff, lin, scale):
                     ctr.update(zc, var)
                     rec_lat.append((i, zc, var, side))
                     used_lat = True

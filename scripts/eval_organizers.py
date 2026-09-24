@@ -100,12 +100,16 @@ def main() -> int:
                 objs.append(o)
         # confirmed obstacles not explained by any synthetic object
         false = []
+        false_obs = []
         for ob in d["obstacles"]:
             s0 = ob["s_m"]
             if not any(o["s"][0] - 3.0 <= s0 <= o["s"][1] + 3.0 for o in objs):
                 false.append(round(float(ob["distance_m"]), 1))
+                sig_c = float(np.interp(s0, res.track.s, res.track.sig_c))
+                false_obs.append({**ob, "sig_c": round(sig_c, 3)})
         rows.append({"frame": i, "status": d["status"], "speed_kmh": d["speed_kmh"],
-                     "objects": objs, "false": false})
+                     "observed_until_m": d["observed_until_m"], "objects": objs,
+                     "false": false, "false_obs": false_obs})
         if i % 100 == 0:
             print(f"frame {i}/{n}", file=sys.stderr)
     with open(args.out / "frames.jsonl", "w", encoding="utf-8") as fh:

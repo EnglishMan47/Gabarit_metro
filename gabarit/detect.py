@@ -259,6 +259,17 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
             cand.rejected = "longitudinal_structure"
         if cand.rejected is None and abs(cand.lateral) > 0.5 and _fixture_row(s, d, h, cand):
             cand.rejected = "side_fixture_row"
+        if cand.rejected is None and cand.s_near > track.rail_until + 10.0:
+            # beyond the rails the path may drift towards a wall on a curve; the
+            # walls themselves are tracked independently, and anything on the
+            # wall line is wall equipment (the envelope edge is >= 1.2 m from a
+            # tunnel wall, >= 0.5 m from a platform edge)
+            for side in (+1, -1):
+                w = track.wall_offset(cand.s_near, side)
+                if w is not None and side * w > 0.5:
+                    gap = (w - cand.d_max) if side > 0 else (cand.d_min - w)
+                    if gap < det.wall_line_gap:
+                        cand.rejected = "wall_line"
         if cand.rejected is None and cand.s_near > 80.0:
             # far away only person-sized evidence is trusted: a thin pole or a
             # couple of returns can be signal equipment seen through path error

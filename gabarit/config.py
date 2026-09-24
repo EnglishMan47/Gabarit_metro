@@ -73,6 +73,7 @@ class DetectionConfig:
     ground_margin: float = 0.12    # clusters lower than this above local floor are ground
     ceiling_margin: float = 0.35
     wall_attach_margin: float = 0.35
+    wall_line_gap: float = 0.5     # beyond the rails: closer to a tracked wall = wall equipment
     max_clusters: int = 32
     # low objects on the rails (e.g. 300x300x100 mm): stricter temporal check
     low_max_height: float = 0.45
