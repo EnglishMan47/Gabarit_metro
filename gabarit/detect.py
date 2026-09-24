@@ -153,6 +153,19 @@ def _longitudinal(s: np.ndarray, d: np.ndarray, h: np.ndarray, members: np.ndarr
     return nb >= 2 and na >= 2 and nb + na >= 5
 
 
+def _line_far(s: np.ndarray, d: np.ndarray, h: np.ndarray, cand: "Candidate") -> bool:
+    """True if a far cluster lies on a sparse line of returns running along
+    the track inside the envelope (dividing wall between the branches beyond a
+    turnout, a wall seen through a path error). The envelope of a normal
+    tunnel is empty, so such a line is structure; an obstacle is local."""
+    tol_d = 0.25 + 0.003 * cand.s_near
+    lo = max(cand.h_min - 0.3, 0.3)
+    near = (np.abs(d - cand.lateral) < tol_d) & (h > lo) & (h < cand.h_max + 0.3)
+    other = near & (((s < cand.s_near - 1.0) & (s > cand.s_near - 40.0))
+                    | ((s > cand.s_far + 1.0) & (s < cand.s_far + 40.0)))
+    return len(np.unique(np.floor(s[other] / 2.0))) >= 5
+
+
 def _fixture_row(s: np.ndarray, d: np.ndarray, h: np.ndarray, cand: "Candidate") -> bool:
     """True if similar returns repeat along the same side line (brackets, boxes,
     signal heads mounted on the wall at a regular pitch)."""
@@ -259,11 +272,14 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
             cand.rejected = "longitudinal_structure"
         if cand.rejected is None and abs(cand.lateral) > 0.5 and _fixture_row(s, d, h, cand):
             cand.rejected = "side_fixture_row"
-        if cand.rejected is None and cand.s_near > track.rail_until + 10.0:
+        if cand.rejected is None and cand.s_near > 60.0 and _line_far(s, d, h, cand):
+            cand.rejected = "line_far"
+        if cand.rejected is None and cand.s_near > track.rail_until + 10.0 and cand.d_max - cand.d_min < 1.2:
             # beyond the rails the path may drift towards a wall on a curve; the
             # walls themselves are tracked independently, and anything on the
             # wall line is wall equipment (the envelope edge is >= 1.2 m from a
-            # tunnel wall, >= 0.5 m from a platform edge)
+            # tunnel wall, >= 0.5 m from a platform edge); a body spanning the
+            # envelope is not wall equipment
             for side in (+1, -1):
                 w = track.wall_offset(cand.s_near, side)
                 if w is not None and side * w > 0.5:

@@ -79,6 +79,7 @@ export class Scene3D {
     train.position.copy(tv(0, -3.2, 1.45));
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(train.geometry), new THREE.LineBasicMaterial({ color: 0x60a5fa }));
     train.add(edges);
+    this.train = train;
     this.scene.add(train);
     const sensor = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.14, 16), new THREE.MeshBasicMaterial({ color: 0x38bdf8 }));
     sensor.position.copy(tv(0, 0, 1.1));
@@ -113,6 +114,8 @@ export class Scene3D {
 
   _placeCamera(force = false) {
     const m = this.camMode;
+    // the cab camera sits inside the train model: its edges would cross the view
+    this.train.visible = m !== 'cab';
     if (m === 'free') return;
     const h = (this.frame && this.frame.calibration && this.frame.calibration.height_m) || 1.1;
     let pos, look;

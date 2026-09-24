@@ -327,6 +327,14 @@ class App:
         app.router.add_post("/api/feedback", self.api_feedback)
         app.router.add_get("/ws", self.ws)
         app.router.add_static("/static/", STATIC, show_index=False)
+
+        async def revalidate(request: web.Request, response: web.StreamResponse) -> None:
+            # the page must not run stale scripts after an update; unchanged
+            # files are still answered with 304 Not Modified
+            if request.path == "/" or request.path.startswith("/static/"):
+                response.headers["Cache-Control"] = "no-cache"
+
+        app.on_response_prepare.append(revalidate)
         return app
 
 

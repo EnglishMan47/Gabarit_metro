@@ -100,38 +100,36 @@ function onFrame(buf) {
 const SHAPE_RU = { person: 'человек', child: 'ребёнок', box_50cm: 'ящик', box_30cm: 'предмет на рельсе', barrel: 'бочка', trolley: 'тележка', cable: 'кабель' };
 
 function renderStatus(m) {
-  const card = $('statusCard'), hud = $('hudStatus'), vp = $('viewport');
+  const card = $('statusCard'), vp = $('viewport');
   let cls = 'state-ok', label = 'ПУТЬ СВОБОДЕН', main = `${fmt(m.free_distance_m)} м`, sub = 'путь проверен и свободен на это расстояние';
-  let hudState = 'ПУТЬ СВОБОДЕН', hudDetail = `свободно ${fmt(m.free_distance_m)} м · ${fmt(m.speed_kmh)} км/ч`, hcls = 'ok';
   if (m.status === 'OBSTACLE') {
     const o = m.obstacles[0];
     cls = 'state-bad'; label = 'ПРЕПЯТСТВИЕ — ТОРМОЖЕНИЕ';
     main = `${fmt(m.nearest_distance_m, 1)} м`;
-    sub = `до ближайшего объекта в габарите · ${o.low ? 'низкий объект на рельсе' : 'высота ' + fmt(o.box.h[1], 2) + ' м'} · смещение ${fmt(o.lateral_m, 2)} м`;
-    hudState = 'ВПЕРЕДИ ПРЕПЯТСТВИЕ'; hcls = 'bad';
-    hudDetail = `${fmt(m.nearest_distance_m, 1)} м · ${m.time_to_obstacle_s ? 'через ' + fmt(m.time_to_obstacle_s, 1) + ' с' : 'поезд стоит'}`;
+    const when = m.time_to_obstacle_s ? `через ${fmt(m.time_to_obstacle_s, 1)} с` : 'поезд стоит';
+    sub = `ближайший из ${m.obstacles.length}: ${obKind(o)}, смещение ${fmt(o.lateral_m, 2)} м · ${when}`;
   } else if (m.status === 'CHECK') {
     const o = m.pending[0];
     cls = 'state-warn'; label = 'ПРОВЕРКА ОБЪЕКТА';
-    main = `${fmt(o.distance_m, 0)} м`; sub = 'кандидат подтверждается на следующих кадрах';
-    hudState = 'ВНИМАНИЕ'; hcls = 'warn'; hudDetail = `возможное препятствие ${fmt(o.distance_m, 0)} м`;
+    main = `${fmt(o.distance_m, 0)} м`; sub = 'возможное препятствие подтверждается на следующих кадрах';
   } else if (m.status === 'DEGRADED') {
-    cls = 'state-warn'; label = 'НЕТ ОПОРЫ ПУТИ'; main = '—'; sub = 'рельсы и стены не распознаны'; hudState = 'СНИЖЕННОЕ ДОВЕРИЕ'; hcls = 'warn';
-    hudDetail = 'проверьте установку лидара';
+    cls = 'state-warn'; label = 'НЕТ ОПОРЫ ПУТИ'; main = '—'; sub = 'рельсы и стены не распознаны — проверьте установку лидара';
   }
   card.className = `status-card ${cls}`;
   $('statusLabel').textContent = label; $('statusMain').textContent = main; $('statusSub').textContent = sub;
-  if (m.turnout_ahead_m) hudDetail += ` · стрелка через ${fmt(m.turnout_ahead_m, 0)} м, маршрут не определён`;
-  hud.className = `hud-status ${hcls}`; $('hudState').textContent = hudState; $('hudDetail').textContent = hudDetail;
+  const note = $('statusNote');
+  note.classList.toggle('hidden', !m.turnout_ahead_m);
+  if (m.turnout_ahead_m) note.textContent = `Стрелка через ${fmt(m.turnout_ahead_m, 0)} м: маршрут за ней не определён`;
   vp.classList.toggle('alarm', m.status === 'OBSTACLE');
   vp.classList.toggle('check', m.status === 'CHECK');
   $('mSpeed').textContent = fmt(m.speed_kmh, 0);
   $('mFree').textContent = fmt(m.free_distance_m, 0);
   $('mStop').textContent = fmt(m.stopping_distance_m, 0);
   $('mTtc').textContent = m.time_to_obstacle_s ? fmt(m.time_to_obstacle_s, 1) : '—';
-  $('mLat').textContent = fmt(m.timing_ms.total, 0);
   const fps = state.fpsHist.length ? state.fpsHist.reduce((a, b) => a + b, 0) / state.fpsHist.length : null;
-  $('mFps').textContent = state.playing || state.mode === 'live' ? fmt(fps, 1) : '—';
+  const ms = m.timing_ms.total;
+  $('sysInfo').textContent = `обработка ${fmt(ms, 0)} мс` + (state.playing || state.mode === 'live' ? ` · ${fmt(fps, 1)} кадр/с` : '');
+  $('sysInfo').classList.toggle('slow', ms > 100);
   if (m.frames) $('frameLabel').textContent = `кадр ${m.frame + 1} / ${m.frames}`;
   $('timeLabel').textContent = m.bag_time_s !== undefined ? `${fmt(m.bag_time_s, 1)} с записи` : '';
   const cal = m.calibration || {};
@@ -257,8 +255,8 @@ function drawRadar(m) {
     g.font = `bold ${13 * k}px Segoe UI, sans-serif`; g.fillText(`${o.distance_m.toFixed(1)} м`, X(o.s_m) + 10 * k, y0 - 8 * k);
     g.font = `${11 * k}px Segoe UI, sans-serif`;
   });
-  g.fillStyle = '#dbe5f0'; g.font = `bold ${12 * k}px Segoe UI, sans-serif`;
-  g.fillText(m.status === 'OBSTACLE' ? `препятствие ${m.nearest_distance_m.toFixed(1)} м` : `путь свободен на ${obs.toFixed(0)} м`, 12 * k, 16 * k);
+  g.fillStyle = '#7f93a8'; g.font = `${11 * k}px Segoe UI, sans-serif`;
+  g.fillText('схема пути · заливка — проверенный участок', 12 * k, 16 * k);
   void tr;
 }
 

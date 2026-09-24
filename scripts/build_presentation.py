@@ -77,6 +77,17 @@ def fill(shape, text, size=None):
                 r.font.size = Pt(size)
 
 
+def plural(n, one: str, few: str, many: str) -> str:
+    """Russian plural form: 1 событие, 4 события, 13 событий."""
+    if not isinstance(n, int):
+        return many
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
 def load_numbers() -> dict:
     n = {"fp_events": "—", "fp_minutes": "—", "clean_frames": "—", "p95": "—", "person_med": "—", "person_max": "—",
          "child_med": "—", "box_med": "—", "trolley_med": "—", "synthetic": {}}
@@ -212,7 +223,7 @@ def main() -> int:
     chart.chart_title.text_frame.text = "Дистанция подтверждения, м (синтетика в реальных проездах)"
     fill(ph(s, 21), "100%", size=24)
     fill(ph(s, 18), "обнаружение испытательных объектов (64 сближения, 4 типа)", size=12)
-    fill(ph(s, 22), f"{N['fp_events']} событий", size=24)
+    fill(ph(s, 22), f"{N['fp_events']} {plural(N['fp_events'], 'событие', 'события', 'событий')}", size=24)
     fill(ph(s, 23), f"ложных тревог на {N['clean_frames']} кадрах ({N['fp_minutes']} мин) пяти чистых проездов; "
                     "10 из них — стоянка у станции за стрелкой (было 36)", size=12)
     fill(ph(s, 24), f"{N.get('p95_typical', N['p95'])}–{N['p95']} мс", size=24)

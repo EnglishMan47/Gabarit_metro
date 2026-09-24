@@ -31,16 +31,13 @@
     <div class="framebox"><span id="frameLabel">—</span><span id="timeLabel"></span></div>
   </div>
   <div class="live-badge hidden" id="liveBadge"><span class="dot"></span>LIVE · ROS 2</div>
+  <div class="sys" id="sysInfo" title="Время обработки кадра на сервере и частота кадров (цель: не более 100 мс, 10 кадров/с)">—</div>
   <div class="conn" id="conn" title="Соединение с сервером">●</div>
 </header>
 
 <main class="layout">
   <section class="viewport" id="viewport">
     <canvas id="scene"></canvas>
-    <div class="hud-status" id="hudStatus">
-      <div class="hud-state" id="hudState">ОЖИДАНИЕ</div>
-      <div class="hud-detail" id="hudDetail">выберите запись и нажмите ▶</div>
-    </div>
     <div class="cams" id="cams">
       <button data-cam="cab" class="active" title="Вид из кабины (1)">Кабина</button>
       <button data-cam="chase" title="Сзади сверху (2)">Сзади</button>
@@ -73,23 +70,22 @@
     <div class="status-card state-idle" id="statusCard">
       <div class="status-label" id="statusLabel">НЕТ ДАННЫХ</div>
       <div class="status-main" id="statusMain">—</div>
-      <div class="status-sub" id="statusSub">расстояние до ближайшего препятствия</div>
+      <div class="status-sub" id="statusSub">выберите запись и нажмите ▶</div>
+      <div class="status-note hidden" id="statusNote"></div>
     </div>
     <div class="metrics">
       <div class="metric"><span class="m-val" id="mSpeed">—</span><span class="m-lab">скорость, км/ч</span></div>
       <div class="metric"><span class="m-val" id="mFree">—</span><span class="m-lab">свободно, м</span></div>
       <div class="metric"><span class="m-val" id="mStop">—</span><span class="m-lab">тормозной путь, м</span></div>
       <div class="metric"><span class="m-val" id="mTtc">—</span><span class="m-lab">до препятствия, с</span></div>
-      <div class="metric"><span class="m-val" id="mLat">—</span><span class="m-lab">обработка, мс</span></div>
-      <div class="metric"><span class="m-val" id="mFps">—</span><span class="m-lab">кадров/с</span></div>
     </div>
 
     <div class="obstacles" id="obstacles"></div>
 
     <nav class="tabs" id="tabs">
       <button data-tab="test" class="active">Испытание</button>
-      <button data-tab="layers">Слои</button>
-      <button data-tab="params">Параметры</button>
+      <button data-tab="layers">Вид</button>
+      <button data-tab="params">Детектор</button>
       <button data-tab="perf">Скорость</button>
       <button data-tab="log">Журнал</button>
     </nav>
