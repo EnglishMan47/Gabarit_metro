@@ -20,7 +20,7 @@ from pptx.chart.data import CategoryChartData
 from pptx.util import Pt
 
 ROOT = Path(__file__).resolve().parents[1]
-IMG = ROOT / "artifacts" / "release_v2"
+IMG = ROOT / "artifacts" / "release_v3"
 TEAM = "[заполняет капитан]"
 
 

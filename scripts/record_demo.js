@@ -1,6 +1,7 @@
 // Records the demo video and screenshots of the web interface (needs the
 // server running on :8000 and `npm i playwright-core`).
 //   node scripts/record_demo.js [outDir]
+//   GABARIT_URL=http://127.0.0.1:8010 NO_VIDEO=1 node scripts/record_demo.js artifacts/release_v3
 const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
@@ -13,8 +14,9 @@ const CHROME = process.env.CHROME || 'C:\\Program Files\\Google\\Chrome\\Applica
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch({ headless: true, executablePath: CHROME,
     args: ['--use-gl=angle', '--enable-webgl', '--ignore-gpu-blocklist'] });
-  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1,
-    recordVideo: { dir: OUT, size: { width: 1600, height: 900 } } });
+  // NO_VIDEO=1: screenshots only (video recording needs Playwright's ffmpeg)
+  const video = process.env.NO_VIDEO ? {} : { recordVideo: { dir: OUT, size: { width: 1600, height: 900 } } };
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1, ...video });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   const wait = (ms) => page.waitForTimeout(ms);

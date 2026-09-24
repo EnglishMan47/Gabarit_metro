@@ -181,7 +181,17 @@ function answer(trackId, verdict) {
   renderObstacles(m);
 }
 
+function toastText(o) {
+  return `<b>${fmt(o.distance_m, 1)} м</b> — ${obKind(o)}, смещение от оси ${fmt(o.lateral_m, 2)} м.<br>Подтвердите обнаружение: решение попадёт в журнал оператора.`;
+}
+
 function maybeToast(m) {
+  if (state.toastFor) {
+    // keep the request in step with its object; drop it once the object is gone
+    const cur = m.obstacles.find((x) => x.track_id === state.toastTrack);
+    if (cur) $('toastBody').innerHTML = toastText(cur);
+    else hideToast();
+  }
   for (const o of m.obstacles) {
     const key = `${state.bag ? state.bag.id : 'live'}#${o.track_id}`;
     if (state.seen.has(key)) continue;
@@ -189,7 +199,7 @@ function maybeToast(m) {
     if (state.answered.has(key)) continue;
     state.toastFor = key;
     state.toastTrack = o.track_id;
-    $('toastBody').innerHTML = `<b>${fmt(o.distance_m, 1)} м</b> — ${obKind(o)}, смещение от оси ${fmt(o.lateral_m, 2)} м.<br>Подтвердите обнаружение: решение попадёт в журнал оператора.`;
+    $('toastBody').innerHTML = toastText(o);
     $('toast').classList.remove('hidden');
     beep();
   }
