@@ -212,6 +212,10 @@ export class Scene3D {
     const alarm = fr.status === 'OBSTACLE', check = fr.status === 'CHECK';
     const envColor = alarm ? 0xef4444 : check ? 0xf59e0b : 0x22c55e;
     const S = tr.s, C = tr.c, Z = tr.z;
+    // beyond the observed range the path is only extrapolated and jitters from
+    // frame to frame: draw a short grey hint of it, not a 200 m tail (the
+    // radar strip shows the unobserved part as hatching)
+    const sDraw = Math.min(200, S[S.length - 1], Math.max(obs, 20) + 15);
     // --- envelope: translucent walls + roof edges, dimmer beyond the observed range
     if (this.layers.envelope) {
       const build = (s0, s1, opacity, color) => {
@@ -252,14 +256,14 @@ export class Scene3D {
             new THREE.LineBasicMaterial({ color, transparent: true, opacity: Math.min(1, opacity * 4) })));
         }
       };
-      const sEnd = Math.min(200, S[S.length - 1]);
+      const sEnd = sDraw;
       build(3, Math.max(4, Math.min(obs, sEnd)), 0.09, envColor);
       if (obs < sEnd - 2) build(Math.max(3, obs), sEnd, 0.03, 0x64748b);
     }
     // --- path centre and rails
     if (this.layers.path) {
       const centre = [], rl = [], rr = [];
-      for (let s = 3; s <= Math.min(S[S.length - 1], 200); s += 1) {
+      for (let s = 3; s <= sDraw; s += 1) {
         const c = interp(S, C, s), z = interp(S, Z, s);
         centre.push(tv(c, s, z + 0.01)); rl.push(tv(c + 0.8, s, z)); rr.push(tv(c - 0.8, s, z));
       }
@@ -280,7 +284,7 @@ export class Scene3D {
     // --- distance markers
     if (this.layers.markers) {
       for (let s = 25; s <= 200; s += 25) {
-        if (s > S[S.length - 1]) break;
+        if (s > sDraw) break;
         const c = interp(S, C, s), z = interp(S, Z, s);
         const sp = labelSprite(`${s} м`, s <= obs ? '#9fb3c8' : '#566476', s % 50 ? 0.9 : 1.2);
         sp.position.copy(tv(c - W / 2 - 1.8, s, z + 0.4));
