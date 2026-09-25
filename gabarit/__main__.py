@@ -83,7 +83,8 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("web", help="web interface")
-    w.add_argument("--data", default=str(DEFAULT_DATA))
+    w.add_argument("--data", action="append",
+                   help="folder with bags, may be repeated (default: for_hackathon + synthetic_organizers)")
     w.add_argument("--config", default=None)
     w.add_argument("--host", default="127.0.0.1")
     w.add_argument("--port", default="8000")
@@ -104,7 +105,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sys.path.insert(0, str(ROOT))
     if args.cmd == "web":
-        sys.argv = ["web.server", "--data", args.data, "--host", args.host, "--port", args.port]
+        sys.argv = ["web.server", "--host", args.host, "--port", args.port]
+        for d in args.data or []:
+            sys.argv += ["--data", d]
         if args.config:
             sys.argv += ["--config", args.config]
         runpy.run_module("web.server", run_name="__main__")

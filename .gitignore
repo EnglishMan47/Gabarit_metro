@@ -18,3 +18,6 @@ ros2/ws/
 # organizers synthetic bag and evaluation outputs
 *.zst
 results/
+
+# local tool settings (Claude Code)
+.claude/

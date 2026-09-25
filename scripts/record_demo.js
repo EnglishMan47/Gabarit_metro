@@ -51,7 +51,8 @@ const CHROME = process.env.CHROME || 'C:\\Program Files\\Google\\Chrome\\Applica
   await page.click('#btnPlay');
 
   // 2. moving train, synthetic person placed 190 m ahead
-  await page.selectOption('#bagSelect', { index: 4 });
+  const curve = await page.$$eval('#bagSelect option', (os) => os.find((o) => o.value.includes('roundT_squareT_pressureGate_squareT')).value);
+  await page.selectOption('#bagSelect', curve);
   await page.waitForFunction(() => document.querySelector('#frameLabel').textContent.includes('кадр 1 '), null, { timeout: 60000 });
   await wait(1500);
   await page.click('[data-cam="cab"]');

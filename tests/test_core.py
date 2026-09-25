@@ -12,11 +12,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import gabarit  # noqa: E402,F401
-from gabarit.cloud import from_raw  # noqa: E402
+from gabarit.cloud import estimate_rings, from_raw  # noqa: E402
 from gabarit.config import Config  # noqa: E402
 from gabarit.detect import connected_components  # noqa: E402
 from gabarit.pipeline import Pipeline  # noqa: E402
-from gabarit.rosbag import decode_pointcloud2  # noqa: E402
+from gabarit.egomotion import EgoMotion  # noqa: E402
+from gabarit.rosbag import RawCloud, bag_title, decode_pointcloud2  # noqa: E402
 from gabarit.synth import SyntheticObstacle, inject  # noqa: E402
 from gabarit.track import TrackEstimator  # noqa: E402
 from tests.sim import encode_pointcloud2, tunnel_scan  # noqa: E402
@@ -122,3 +123,60 @@ def test_yawed_sensor_path_follows_track():
     # the tunnel axis is rotated by -1.5 deg in the sensor frame
     expected = -math.tan(math.radians(1.5)) * 30.0
     assert abs(np.interp(30, tr.s, tr.c) - expected) < 0.25
+
+
+def _without_ring(raw: RawCloud) -> RawCloud:
+    """The same scan as an unorganized x, y, z, intensity cloud (organizers' bag format)."""
+    a = raw.points
+    b = np.zeros(len(a), dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("intensity", "<f4")])
+    for k in b.dtype.names:
+        b[k] = a[k]
+    return RawCloud(raw.stamp, raw.frame_id, 1, len(b), b)
+
+
+def test_rings_are_recovered_from_elevation():
+    raw = tunnel_scan(cols=300)
+    a = raw.points
+    x, y, z = (np.asarray(a[k], np.float32) for k in "xyz")
+    valid = (x * x + y * y + z * z) > 1.0
+    est = estimate_rings(x, y, z, valid)
+    true = np.asarray(a["ring"])[valid & (est >= 0)]
+    got = est[valid & (est >= 0)]
+    # one estimated beam per true beam: the mapping is one-to-one
+    pairs = np.unique(np.column_stack((true, got)), axis=0)
+    assert len(pairs) == len(np.unique(true)) == len(np.unique(got))
+
+
+def test_cloud_without_ring_field_still_detects():
+    box = [(0.0, 40.0, 0.6, 0.5, -0.1, 1.2)]
+    frames = [_without_ring(tunnel_scan(boxes=box, stamp=0.1 * k)) for k in range(6)]
+    assert from_raw(frames[0]).rings > 60
+    _, res = run(frames)
+    assert res.data["obstacle"], res.data["candidates"]
+    assert abs(res.data["nearest_track_distance_m"] - 40.0) < 1.0
+
+
+def test_bag_titles_are_readable():
+    title, group = bag_title("doubleT_obstacle")
+    assert "Человек" in title and group == "С препятствиями"
+    assert bag_title("cloud_with_fake_obj")[1] == "Синтетические препятствия"
+    title, group = bag_title("roundT_platform")          # unknown: built from the words
+    assert title == "Круглый тоннель, платформа" and group.startswith("Штатные")
+
+
+def test_egomotion_recovers_after_a_wrong_lock():
+    """A textured corridor moving 1.5 m per frame: the filter, forced to a wrong
+    speed with full confidence, must re-acquire the true motion."""
+    rng = np.random.default_rng(0)
+    marks = rng.uniform(0, 400, 600)
+    def frame(shift):
+        f = marks - shift
+        f = f[(f > 2) & (f < 60)]
+        pts = [np.column_stack((np.full(len(f), side * 2.0), f, np.full(len(f), 1.5))) for side in (-1, 1)]
+        return np.vstack(pts).astype(np.float32)
+    ego = EgoMotion(max_speed=25.0)
+    ego.update(frame(0.0), 0.0)
+    ego.v, ego.P, ego.initialised = 0.0, 1e-4, True   # locked on "standing"
+    for k in range(1, 40):
+        ego.update(frame(1.5 * k), 0.1 * k)
+    assert abs(ego.v - 15.0) < 1.5, ego.v

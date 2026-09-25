@@ -17,6 +17,7 @@ import gabarit  # noqa: F401  (sets single-threaded BLAS before NumPy loads)
 import argparse
 import asyncio
 import csv
+import dataclasses
 import hashlib
 import io
 import json
@@ -108,10 +109,16 @@ class LiveHub:
 
 
 class App:
-    def __init__(self, data_root: Path | None, config_path: Path | None, live: bool = False):
-        self.data_root = data_root
+    def __init__(self, data_root: Path | list[Path] | None, config_path: Path | None, live: bool = False):
+        roots = [] if data_root is None else [data_root] if isinstance(data_root, Path) else list(data_root)
+        self.data_root = roots[0] if roots else None
         self.base_cfg = Config.load(config_path)
-        self.bags = {b.id: b for b in discover_bags(data_root)} if data_root else {}
+        self.bags = {}
+        for root in roots:
+            for b in discover_bags(root):
+                if b.id in self.bags:   # same relative path under two roots
+                    b = dataclasses.replace(b, id=f"{Path(root).name}/{b.id}")
+                self.bags[b.id] = b
         self.journal = Journal(PROJECT / "artifacts" / "operator_journal.jsonl")
         self.cache = PROJECT / "artifacts" / "scan_cache"
         self.live = LiveHub() if live else None
@@ -338,19 +345,26 @@ class App:
         return app
 
 
+DEFAULT_DATA = [PROJECT / "data" / "extracted" / "for_hackathon",
+                PROJECT / "data" / "extracted" / "synthetic_organizers"]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Gabarit web interface")
-    ap.add_argument("--data", type=Path, default=PROJECT / "data" / "extracted" / "for_hackathon",
-                    help="directory with ROS 2 bags (searched recursively)")
+    ap.add_argument("--data", type=Path, action="append",
+                    help="directory with ROS 2 bags, searched recursively; may be repeated "
+                         "(default: data/extracted/for_hackathon and data/extracted/synthetic_organizers)")
     ap.add_argument("--config", type=Path, default=None)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    if not args.data.exists():
-        LOG.warning("data directory %s does not exist: no bags to play", args.data)
-    app = App(args.data, args.config)
-    LOG.info("found %d bags in %s", len(app.bags), args.data)
+    roots = args.data or [d for d in DEFAULT_DATA if d.exists()] or DEFAULT_DATA[:1]
+    for d in roots:
+        if not d.exists():
+            LOG.warning("data directory %s does not exist: no bags to play", d)
+    app = App(roots, args.config)
+    LOG.info("found %d bags in %s", len(app.bags), ", ".join(str(d) for d in roots))
     print(f"\n  Gabarit: откройте http://{'localhost' if args.host in ('0.0.0.0', '127.0.0.1') else args.host}:{args.port}\n")
     web.run_app(app.make(), host=args.host, port=args.port, print=None)
     return 0

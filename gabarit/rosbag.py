@@ -125,13 +125,48 @@ class BagInfo:
         return (self.end_ns - self.start_ns) / 1e9
 
     def public(self) -> dict:
+        title, group = bag_title(self.name)
         return {
             "id": self.id,
             "name": self.name,
+            "title": title,
+            "group": group,
             "topic": self.topic,
             "frames": self.frame_count,
             "duration_s": round(self.duration_s, 2),
         }
+
+
+# readable titles of the recordings of the task (others are built from the name)
+_TITLES = {
+    "doubleT_obstacle": "Человек и предмет на рельсе · двухпутный тоннель, стоянка",
+    "doubleT_platform": "Подход к платформе · двухпутный тоннель, торможение",
+    "roundT_doubleT": "Кривая, переход в двухпутный тоннель · 55–69 км/ч",
+    "roundT_pressureGate_roundT": "Гермозатвор на кривой · круглый тоннель",
+    "roundT_squareT_pressureGate_squareT": "Смена сечения и гермозатвор · кривая",
+    "squareT_platform_squareT_switch": "Платформа, стоянка, стрелочный перевод",
+    "cloud_with_fake_obj": "Синтетика организаторов · 10 объектов через ~100 м",
+}
+_WORDS = {
+    "roundT": "круглый тоннель", "squareT": "прямоугольный тоннель", "doubleT": "двухпутный тоннель",
+    "platform": "платформа", "pressureGate": "гермозатвор", "switch": "стрелка", "obstacle": "препятствие",
+}
+
+
+def bag_title(name: str) -> tuple[str, str]:
+    """Russian title and group (with obstacles / regular ride / synthetic) of a recording."""
+    low = name.lower()
+    if "fake" in low or "synth" in low:
+        group = "Синтетические препятствия"
+    elif "obstacle" in low:
+        group = "С препятствиями"
+    else:
+        group = "Штатные проезды (без препятствий)"
+    if name in _TITLES:
+        return _TITLES[name], group
+    words = [_WORDS.get(w, w) for w in name.split("_") if w]
+    title = ", ".join(dict.fromkeys(words)) if words else name
+    return title[:1].upper() + title[1:], group
 
 
 def _connect(path: Path) -> sqlite3.Connection:

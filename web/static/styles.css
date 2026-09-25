@@ -38,7 +38,7 @@ kbd { background: #1b2633; border: 1px solid var(--line); border-radius: 4px; pa
 .brand-name { font-weight: 800; letter-spacing: .18em; font-size: 17px; }
 .brand-sub { color: var(--muted); font-size: 11.5px; }
 .transport { display: flex; align-items: center; gap: 8px; flex: 1; }
-.transport #bagSelect { max-width: 330px; min-width: 0; flex-shrink: 1; }
+.transport #bagSelect { width: 420px; max-width: 34vw; min-width: 0; flex-shrink: 1; text-overflow: ellipsis; }
 button.icon { width: 42px; padding: 6px 0; text-align: center; }
 .framebox { display: flex; flex-direction: column; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; margin-left: 6px; white-space: nowrap; }
 .framebox #frameLabel { color: var(--text); font-size: 13px; }

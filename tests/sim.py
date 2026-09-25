@@ -34,7 +34,6 @@ def tunnel_scan(height: float = 1.1, gauge: float = 1.6, half_width: float = 2.4
     df = np.cos(E) * np.cos(A)
     dz = np.sin(E)
     d = np.column_stack((dx.ravel(), df.ravel(), dz.ravel()))
-    o = np.zeros(3)
     t = np.full(len(d), np.inf)
     inten = np.full(len(d), 10.0)
     bed = -height - 0.18

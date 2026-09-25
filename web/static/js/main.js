@@ -37,7 +37,13 @@ function onJson(m) {
     if (m.mode === 'playback') {
       state.bags = m.bags;
       const sel = $('bagSelect');
-      sel.innerHTML = m.bags.map((b) => `<option value="${b.id}">${b.name} · ${b.frames} кадров · ${b.duration_s.toFixed(0)} с</option>`).join('');
+      // grouped, readable titles; the technical bag name stays in the tooltip
+      const order = ['С препятствиями', 'Штатные проезды (без препятствий)', 'Синтетические препятствия'];
+      const groups = new Map();
+      m.bags.forEach((b) => { const g = b.group || 'Записи'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(b); });
+      const keys = [...groups.keys()].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+      sel.innerHTML = keys.map((g) => `<optgroup label="${g}">${groups.get(g).map((b) =>
+        `<option value="${b.id}" title="${b.name} · ${b.frames} кадров">${b.title || b.name} · ${b.duration_s.toFixed(0)} с</option>`).join('')}</optgroup>`).join('');
       const pref = m.bags.find((b) => b.name.includes('obstacle')) || m.bags[0];
       if (pref) { sel.value = pref.id; openBag(pref.id); }
     }
@@ -79,9 +85,18 @@ function onFrame(buf) {
   state.lastArrive = now;
   if (state.fpsHist.length > 20) state.fpsHist.shift();
   state.frame = meta;
-  if (meta.frames) state.frames = meta.frames;
-  if (state.timeline.length !== state.frames) state.timeline = new Array(state.frames).fill(null);
-  if (meta.frame !== undefined && state.timeline.length > meta.frame) {
+  if (state.mode === 'live') {
+    // a live stream has no length: the strip shows the last 60 s (600 frames)
+    const LIVE_N = 600;
+    state.frames = LIVE_N;
+    state.timeline.push({ i: 0, status: meta.status, dist: meta.nearest_distance_m, v: meta.speed_kmh, ids: [], ms: meta.timing_ms.total });
+    while (state.timeline.length > LIVE_N) state.timeline.shift();
+    state.timeline.forEach((it, i) => { if (it) it.i = i; });
+  } else {
+    if (meta.frames) state.frames = meta.frames;
+    if (state.timeline.length !== state.frames) state.timeline = new Array(state.frames).fill(null);
+  }
+  if (state.mode !== 'live' && meta.frame !== undefined && state.timeline.length > meta.frame) {
     const prev = state.timeline[meta.frame];
     state.timeline[meta.frame] = { i: meta.frame, status: meta.status, dist: meta.nearest_distance_m, v: meta.speed_kmh,
       ids: meta.obstacles.map((x) => x.track_id), ms: meta.timing_ms.total, ...(prev && prev.fromScan ? {} : {}) };
@@ -290,12 +305,14 @@ function drawTimeline() {
   state.timeline.forEach((it, i) => { if (!it || it.v === undefined) return; const y = H - 14 * k - (H - 20 * k) * Math.min(it.v, 90) / 90; if (!started) { g.moveTo(i * bw, y); started = true; } else g.lineTo(i * bw, y); });
   g.stroke();
   // cursor
-  if (state.frame && state.frame.frame !== undefined) {
-    const x = (state.frame.frame + 0.5) * bw;
+  const cur = state.mode === 'live' ? state.timeline.length - 1 : state.frame && state.frame.frame;
+  if (cur !== undefined && cur !== null && cur >= 0) {
+    const x = (cur + 0.5) * bw;
     g.fillStyle = '#e2e8f0'; g.fillRect(x - k, 0, 2 * k, H - 12 * k);
   }
   g.fillStyle = '#7f93a8'; g.font = `${10 * k}px Segoe UI, sans-serif`;
-  g.fillText('статус по кадрам · голубая линия — скорость (км/ч)', 4 * k, H - 2 * k);
+  g.fillText(state.mode === 'live' ? 'последние 60 с · статус по кадрам · голубая линия — скорость (км/ч)'
+    : 'статус по кадрам · голубая линия — скорость (км/ч)', 4 * k, H - 2 * k);
 }
 $('timeline').onclick = (e) => {
   if (state.mode !== 'playback' || !state.frames) return;

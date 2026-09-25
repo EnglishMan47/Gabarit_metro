@@ -47,7 +47,7 @@ def main() -> int:
     n = max(len(shots), 1)
     fig, axes = plt.subplots(n, 2, figsize=(22, 4.2 * n), squeeze=False)
     for row, (i, ob, res) in enumerate(shots):
-        lev, tr, geo = res.lev, res.track, res.geo
+        geo = res.geo
         s0 = ob["s_m"]
         win = (geo.s > s0 - 25) & (geo.s < s0 + 25)
         ax = axes[row, 0]
