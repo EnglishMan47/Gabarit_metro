@@ -71,5 +71,6 @@ tracking:
   far_confirm_window: 8
   far_lateral_std: 0.3
   max_speed: 25.0
-braking_deceleration: 1.1
-reaction_time: 1.5
+# emergency braking on an alarm: deceleration, m/s^2, and latency alarm -> brake command, s
+braking_deceleration: 2.5
+reaction_time: 0.3

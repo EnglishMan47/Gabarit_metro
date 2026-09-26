@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Габарит — администрирование</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script>try { const t = localStorage.getItem('gabarit-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<style>
+  body { display: block; overflow: auto; }
+  .adm-top { display: flex; align-items: center; gap: 14px; padding: 12px 20px; background: var(--bg2); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  .adm-top h1 { font-size: 18px; margin: 0; letter-spacing: .1em; }
+  .adm-top .sp { flex: 1; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 16px; padding: 16px 20px 40px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .card h2 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .num { color: var(--muted); font-weight: 600; font-size: 13px; }
+  .wide { grid-column: 1 / -1; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .kv { display: grid; grid-template-columns: 200px 1fr; gap: 4px 12px; font-size: 13px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  textarea { width: 100%; min-height: 260px; font: 12px/1.45 Consolas, "Courier New", monospace; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  input[type=number], input[type=text] { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; color: var(--text); width: 110px; }
+  input[type=text] { width: 260px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; border: 1px solid var(--line); }
+  .pill.ok { color: var(--ok); border-color: var(--ok); } .pill.bad { color: var(--bad); border-color: var(--bad); } .pill.warn { color: var(--warn); border-color: var(--warn); }
+  .msg { font-size: 12.5px; color: var(--muted); min-height: 18px; }
+  .msg.err { color: var(--bad); }
+  .muted { color: var(--muted); }
+  button.danger { border-color: var(--bad); color: var(--bad); }
+  .scroll { max-height: 320px; overflow: auto; }
+</style>
+</head>
+<body>
+<header class="adm-top">
+  <svg viewBox="0 0 32 32" class="logo"><rect x="4" y="3" width="24" height="26" rx="5"/><path d="M10 24 L16 8 L22 24"/></svg>
+  <h1>ГАБАРИТ · АДМИНИСТРИРОВАНИЕ</h1>
+  <span class="sp"></span>
+  <span class="muted" id="uptime"></span>
+  <button id="btnTheme" class="topbtn" title="Светлая / тёмная тема">&#9788;</button>
+  <a class="btn topbtn" href="/">Интерфейс оператора</a>
+</header>
+
+<main class="grid">
+  <section class="card">
+    <h2><span class="num">1</span> Сервис и пользователи</h2>
+    <p class="hint">Интерфейс рассчитан на одного пользователя одновременно: каждому сеансу нужен свой процессор для обработки облаков в реальном времени. Остальные видят «Сервис занят» и подключаются автоматически, когда место освободится. Неактивный сеанс завершается сам.</p>
+    <div class="kv" id="svc"></div>
+    <div class="scroll"><table><thead><tr><th>IP</th><th>с</th><th class="num">работает</th><th class="num">простой</th><th>браузер</th></tr></thead><tbody id="sessions"></tbody></table></div>
+    <div class="row">
+      <label class="muted">пользователей одновременно <input type="number" id="maxUsers" min="0" max="16" step="1"></label>
+      <label class="muted">простой до отключения, мин <input type="number" id="idleMin" min="1" max="240" step="1"></label>
+      <button id="btnLimit">Сохранить</button>
+      <button id="btnKick" class="danger">Завершить все сеансы</button>
+    </div>
+    <div class="msg" id="svcMsg"></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span> MLflow — управление моделью</h2>
+    <p class="hint">Модель детектора — это код и набор параметров. Каждый набор регистрируется в MLflow Model Registry как версия модели, каждая оценка записи — как прогон с параметрами и метриками качества.</p>
+    <div class="kv" id="mlf"></div>
+    <div class="row">
+      <button id="btnMlStart" class="primary">Запустить MLflow</button>
+      <a class="btn" id="mlLink" href="#" target="_blank">Открыть MLflow</a>
+    </div>
+    <div class="msg" id="mlMsg"></div>
+  </section>
+
+  <section class="card wide">
+    <h2><span class="num">3</span> Записи проездов</h2>
+    <p class="hint">Новую запись можно загрузить здесь или кнопкой «+ Загрузить» в интерфейсе оператора: файл <b>.db3</b> (ROS 2 bag в формате sqlite3, можно вместе с metadata.yaml) или архив <b>.zip / .tar</b> с папкой записи. Запись проверяется (должен быть топик PointCloud2) и сразу появляется в списке в группе «Загруженные записи».</p>
+    <div class="row">
+      <input type="file" id="upFile" multiple accept=".db3,.yaml,.zip,.tar,.tgz,.gz">
+      <button id="btnUp" class="primary">Загрузить</button>
+      <div class="progress hidden" id="upProg" style="flex:1;min-width:200px"><i id="upBar"></i></div>
+    </div>
+    <div class="msg" id="upMsg"></div>
+    <div class="scroll"><table><thead><tr><th>Запись</th><th>Группа</th><th class="num">кадров</th><th class="num">с</th><th class="num">МБ</th><th>Папка</th><th></th></tr></thead><tbody id="bags"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span> Параметры детектора (активная версия)</h2>
+    <p class="hint">Параметры применяются к новым сеансам интерфейса и к оценке записей. «Применить» регистрирует их как новую версию модели в MLflow.</p>
+    <div class="row">
+      <label class="muted">готовый профиль <select id="preset"><option value="">— свои параметры ниже —</option><option value="balanced">сбалансированный</option><option value="strict">строгий: минимум ложных тревог</option><option value="sensitive">чувствительный: раннее обнаружение</option></select></label>
+      <input type="text" id="note" placeholder="комментарий к версии">
+    </div>
+    <textarea id="cfg" spellcheck="false"></textarea>
+    <div class="row"><button id="btnCfg" class="primary">Применить и зарегистрировать версию</button><button id="btnCfgReload">Отменить правки</button></div>
+    <div class="msg" id="cfgMsg"></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span> Версии модели</h2>
+    <div class="scroll"><table><thead><tr><th>Время</th><th>Версия</th><th>Файл параметров</th><th>Комментарий</th></tr></thead><tbody id="versions"></tbody></table></div>
+    <h2 style="margin-top:8px"><span class="num">6</span> Оценка на записи</h2>
+    <p class="hint">Прогон активной версии по всей записи: события тревоги, дальность первого обнаружения, задержка. Результат записывается в MLflow (эксперимент «gabarit-evaluation»).</p>
+    <div class="row"><select id="evalBag" style="flex:1"></select><button id="btnEval" class="primary">Оценить</button></div>
+    <div class="msg" id="evalMsg"></div>
+    <div class="scroll"><table><thead><tr><th>Время</th><th>Запись</th><th class="num">событий</th><th class="num">кадров с тревогой</th><th class="num">первое, м</th><th class="num">p95, мс</th><th>MLflow</th></tr></thead><tbody id="runs"></tbody></table></div>
+  </section>
+
+  <section class="card wide">
+    <h2><span class="num">7</span> Журнал оператора</h2>
+    <p class="hint">Решения оператора по тревогам (подтверждено / ложная тревога) из всех сеансов.</p>
+    <div class="row"><span class="muted" id="journalCount"></span><a class="btn" href="/api/journal.csv" download>Экспорт CSV</a></div>
+  </section>
+</main>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const dur = (s) => s >= 3600 ? `${Math.floor(s / 3600)} ч ${Math.floor(s % 3600 / 60)} мин` : s >= 60 ? `${Math.floor(s / 60)} мин ${s % 60} с` : `${s} с`;
+let last = null, cfgDirty = false;
+
+async function api(path, opts = {}) {
+  const r = await fetch(location.origin + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  let body = {};
+  try { body = await r.json(); } catch (e) { /* empty */ }
+  if (!r.ok || body.ok === false) throw new Error(body.error || `ошибка ${r.status}`);
+  return body;
+}
+function msg(id, text, err = false) { $(id).textContent = text; $(id).classList.toggle('err', err); }
+
+async function refresh() {
+  let st;
+  try { st = await api('/api/admin/status'); } catch (e) { msg('svcMsg', e.message, true); return; }
+  last = st;
+  $('uptime').textContent = `работает ${dur(st.uptime_s)}`;
+  $('svc').innerHTML = `<span>Пользователей сейчас</span><span>${st.sessions.length} из ${st.max_users || '∞'}</span>`
+    + `<span>Отказано «занят»</span><span>${st.refused}</span>`
+    + `<span>Папка загрузок</span><span>${esc(st.upload_root || 'отключена')} (до ${st.max_upload_gb} ГБ)</span>`;
+  if (document.activeElement !== $('maxUsers')) $('maxUsers').value = st.max_users;
+  if (document.activeElement !== $('idleMin')) $('idleMin').value = st.idle_min;
+  $('sessions').innerHTML = st.sessions.map((s) => `<tr><td>${esc(s.ip)}</td><td>${s.since}</td><td class="num">${dur(s.active_s)}</td><td class="num">${dur(s.idle_s)}</td><td class="muted">${esc(s.agent.slice(0, 60))}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">сейчас никто не подключён</td></tr>';
+  const m = st.mlflow;
+  $('mlf').innerHTML = `<span>Состояние</span><span>${m.installed ? (m.running ? '<span class="pill ok">работает</span>' : '<span class="pill warn">не запущен</span>') : '<span class="pill bad">не установлен</span>'}</span>`
+    + `<span>Адрес интерфейса</span><span>${esc(m.ui_url)}</span><span>Хранилище</span><span class="muted">${esc(m.tracking_uri)}</span>`
+    + `<span>Модель в реестре</span><span>${esc(m.model)}</span><span>Эксперимент</span><span>${esc(m.experiment)}</span>`;
+  $('mlLink').href = m.ui_url;
+  $('btnMlStart').disabled = !m.installed || m.running;
+  $('bags').innerHTML = st.bags.map((b) => `<tr><td title="${esc(b.name)}">${esc(b.title)}</td><td class="muted">${esc(b.group)}</td><td class="num">${b.frames}</td><td class="num">${Math.round(b.duration_s)}</td><td class="num">${b.size_mb}</td><td class="muted" style="word-break:break-all">${esc(b.path)}</td>`
+    + `<td>${b.uploaded ? `<button class="danger" data-del="${esc(b.id)}">Удалить</button>` : ''}</td></tr>`).join('');
+  document.querySelectorAll('[data-del]').forEach((btn) => btn.onclick = async () => {
+    if (!confirm('Удалить загруженную запись с сервера?')) return;
+    try { await api(`/api/admin/bags/${btn.dataset.del}`, { method: 'DELETE' }); refresh(); } catch (e) { msg('upMsg', e.message, true); }
+  });
+  const sel = $('evalBag'), cur = sel.value;
+  sel.innerHTML = st.bags.map((b) => `<option value="${esc(b.id)}">${esc(b.title)} · ${b.frames} кадров</option>`).join('');
+  if (cur) sel.value = cur;
+  if (!cfgDirty) $('cfg').value = st.config_yaml;
+  $('versions').innerHTML = st.versions.map((v) => `<tr><td>${esc(v.time)}</td><td>${v.version ? `${esc(v.model)} v${esc(v.version)}` : '<span class="muted">файл</span>'}</td><td class="muted">${esc(v.config_file)}</td><td>${esc(v.note || '')}${v.mlflow_error ? `<div class="msg err">${esc(v.mlflow_error)}</div>` : ''}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="muted">версий пока нет</td></tr>';
+  const running = st.jobs.filter((j) => j.state === 'running');
+  if (running.length) msg('evalMsg', running.map((j) => `оценка «${j.bag}»: ${j.done} / ${j.total || '…'} кадров`).join('; '));
+  else { const e = st.jobs.find((j) => j.state === 'error'); if (e) msg('evalMsg', `оценка «${e.bag}»: ${e.error}`, true); }
+  $('runs').innerHTML = st.runs.map((r) => `<tr><td>${esc(r.time)}</td><td>${esc(r.bag)}</td><td class="num">${r.metrics.events}</td><td class="num">${r.metrics.alarm_frames}</td><td class="num">${r.metrics.first_detection_m ? r.metrics.first_detection_m.toFixed(1) : '—'}</td><td class="num">${r.metrics.latency_p95_ms}</td>`
+    + `<td>${r.run_id ? (m.running ? `<a href="${esc(m.ui_url)}/#/experiments" target="_blank">${r.run_id.slice(0, 8)}</a>` : `<span class="muted">${r.run_id.slice(0, 8)}</span>`) : `<span class="muted">${esc(r.mlflow_error ? 'ошибка MLflow' : 'локально')}</span>`}</td></tr>`).join('')
+    || '<tr><td colspan="7" class="muted">прогонов пока нет</td></tr>';
+  $('journalCount').textContent = `записей в журнале: ${st.journal}`;
+}
+
+$('btnLimit').onclick = async () => {
+  try { await api('/api/admin/limit', { method: 'POST', body: JSON.stringify({ max_users: +$('maxUsers').value, idle_min: +$('idleMin').value }) }); msg('svcMsg', 'сохранено'); refresh(); } catch (e) { msg('svcMsg', e.message, true); }
+};
+$('btnKick').onclick = async () => {
+  if (!confirm('Завершить сеансы всех пользователей?')) return;
+  try { const r = await api('/api/admin/kick', { method: 'POST' }); msg('svcMsg', `завершено сеансов: ${r.kicked}`); refresh(); } catch (e) { msg('svcMsg', e.message, true); }
+};
+$('btnMlStart').onclick = async () => {
+  msg('mlMsg', 'запуск MLflow… (до 30 с)');
+  try { const r = await api('/api/admin/mlflow/start', { method: 'POST' }); msg('mlMsg', `MLflow работает: ${r.url}`); refresh(); } catch (e) { msg('mlMsg', e.message, true); }
+};
+$('cfg').oninput = () => { cfgDirty = true; };
+$('preset').onchange = () => { if ($('preset').value) msg('cfgMsg', 'будет применён готовый профиль (параметры в поле ниже не используются)'); else msg('cfgMsg', ''); };
+$('btnCfgReload').onclick = () => { cfgDirty = false; $('preset').value = ''; msg('cfgMsg', ''); refresh(); };
+$('btnCfg').onclick = async () => {
+  msg('cfgMsg', 'применение и регистрация версии…');
+  try {
+    const r = await api('/api/admin/config', { method: 'POST', body: JSON.stringify({ yaml: $('cfg').value, preset: $('preset').value, note: $('note').value, register: true }) });
+    cfgDirty = false; $('preset').value = ''; $('note').value = '';
+    const v = r.version || {};
+    msg('cfgMsg', v.version ? `применено, зарегистрирована версия ${v.version} модели ${v.model}` : `применено; ${v.mlflow_error || 'версия сохранена файлом'}`);
+    refresh();
+  } catch (e) { msg('cfgMsg', e.message, true); }
+};
+$('btnEval').onclick = async () => {
+  try { await api('/api/admin/evaluate', { method: 'POST', body: JSON.stringify({ bag: $('evalBag').value }) }); msg('evalMsg', 'оценка запущена…'); refresh(); } catch (e) { msg('evalMsg', e.message, true); }
+};
+$('btnUp').onclick = () => {
+  const files = [...$('upFile').files];
+  if (!files.length) { msg('upMsg', 'выберите файл', true); return; }
+  const fd = new FormData(); files.forEach((f) => fd.append('file', f, f.name));
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', location.origin + '/api/upload');
+  $('upProg').classList.remove('hidden');
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) $('upBar').style.width = `${Math.round(e.loaded / e.total * 100)}%`; msg('upMsg', `передано ${(e.loaded / 2 ** 20).toFixed(0)} МБ`); };
+  xhr.onload = () => {
+    $('upProg').classList.add('hidden'); $('upBar').style.width = '0';
+    let r = {}; try { r = JSON.parse(xhr.responseText); } catch (e) { /* */ }
+    if (xhr.status === 200 && r.ok) { msg('upMsg', `загружено: ${r.bag ? r.bag.title + ', ' + r.bag.frames + ' кадров' : ''}`); $('upFile').value = ''; refresh(); }
+    else msg('upMsg', r.error || `ошибка ${xhr.status}`, true);
+  };
+  xhr.onerror = () => msg('upMsg', 'соединение прервано', true);
+  xhr.send(fd);
+};
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('gabarit-theme', t); } catch (e) { /* */ }
+  $('btnTheme').innerHTML = t === 'light' ? '&#9790;' : '&#9788;';
+}
+$('btnTheme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+applyTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

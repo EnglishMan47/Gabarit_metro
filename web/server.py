@@ -22,18 +22,27 @@ import hashlib
 import io
 import json
 import logging
+import os
+import shutil
+import socket
+import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
 from aiohttp import WSMsgType, web
 
+from gabarit import mlops
 from gabarit.config import Config
 from gabarit.rosbag import discover_bags
 from gabarit.synth import SHAPES
-from web.session import BagSession, load_cached_scan, save_cached_scan, scan_bag
+from web.admin import (PRESETS, UPLOAD_GROUP, Access, check_admin, config_yaml, mlflow_status, parse_config,
+                       receive_upload)
+from web.session import BagSession, BrakeSim, load_cached_scan, save_cached_scan, scan_bag
 
 LOG = logging.getLogger("gabarit.web")
 ROOT = Path(__file__).resolve().parent
@@ -109,20 +118,55 @@ class LiveHub:
 
 
 class App:
-    def __init__(self, data_root: Path | list[Path] | None, config_path: Path | None, live: bool = False):
+    def __init__(self, data_root: Path | list[Path] | None, config_path: Path | None, live: bool = False,
+                 upload_root: Path | None = None, max_users: int = 1, idle_s: float = 600.0,
+                 max_upload_gb: float = 20.0):
         roots = [] if data_root is None else [data_root] if isinstance(data_root, Path) else list(data_root)
+        self.roots = roots
         self.data_root = roots[0] if roots else None
+        self.upload_root = upload_root
         self.base_cfg = Config.load(config_path)
-        self.bags = {}
-        for root in roots:
-            for b in discover_bags(root):
-                if b.id in self.bags:   # same relative path under two roots
-                    b = dataclasses.replace(b, id=f"{Path(root).name}/{b.id}")
-                self.bags[b.id] = b
+        self.access = Access(max_users, idle_s)
+        self.max_upload = int(max_upload_gb * 2 ** 30)
+        self.started = time.time()
+        self.jobs: dict[str, dict] = {}
+        self.versions_file = PROJECT / "artifacts" / "admin" / "versions.json"
+        self.mlflow_proc: subprocess.Popen | None = None
+        self.bags: dict = {}
+        self.uploaded: set[str] = set()
+        self.rescan()
         self.journal = Journal(PROJECT / "artifacts" / "operator_journal.jsonl")
         self.cache = PROJECT / "artifacts" / "scan_cache"
         self.live = LiveHub() if live else None
         self.pool = ThreadPoolExecutor(max_workers=4)
+
+    def rescan(self) -> None:
+        """(Re)discover the recordings: data roots, then the uploads folder."""
+        bags: dict = {}
+        uploaded: set[str] = set()
+        roots = [(r, False) for r in self.roots]
+        if self.upload_root is not None:
+            roots.append((self.upload_root, True))
+        for root, up in roots:
+            for b in discover_bags(root):
+                if up:
+                    b = dataclasses.replace(b, id=f"uploads/{b.id}")
+                elif b.id in bags:   # same relative path under two roots
+                    b = dataclasses.replace(b, id=f"{Path(root).name}/{b.id}")
+                bags[b.id] = b
+                if up:
+                    uploaded.add(b.id)
+        self.bags, self.uploaded = bags, uploaded
+
+    def bags_public(self) -> list[dict]:
+        out = []
+        for b in self.bags.values():
+            d = b.public()
+            if b.id in self.uploaded:
+                d["group"] = UPLOAD_GROUP
+                d["uploaded"] = True
+            out.append(d)
+        return out
 
     # ---------------------------------------------------------------- http
     async def index(self, request: web.Request) -> web.StreamResponse:
@@ -131,7 +175,7 @@ class App:
     async def api_bags(self, request: web.Request) -> web.Response:
         return web.json_response({
             "mode": "live" if self.live else "playback",
-            "bags": [b.public() for b in self.bags.values()],
+            "bags": self.bags_public(),
             "shapes": {k: {"kind": v[0], "size": v[1:4]} for k, v in SHAPES.items()},
             "config": self.base_cfg.to_dict(),
         })
@@ -156,7 +200,7 @@ class App:
         await ws.prepare(request)
         if self.live is not None:
             return await self._ws_live(ws)
-        return await self._ws_playback(ws)
+        return await self._ws_playback(ws, request)
 
     async def _ws_live(self, ws: web.WebSocketResponse) -> web.WebSocketResponse:
         self.live.loop = asyncio.get_running_loop()
@@ -172,10 +216,16 @@ class App:
         self.live.clients.discard(ws)
         return ws
 
-    async def _ws_playback(self, ws: web.WebSocketResponse) -> web.WebSocketResponse:
+    async def _ws_playback(self, ws: web.WebSocketResponse, request: web.Request) -> web.WebSocketResponse:
         loop = asyncio.get_running_loop()
+        seat = await self.access.admit(ws, request)
+        if seat is None:   # another user is working with the service
+            await ws.send_json(self.access.busy_info())
+            await ws.close()
+            return ws
         state: dict[str, Any] = {"session": None, "playing": False, "speed": 1.0, "task": None,
-                                 "scan_stop": False, "cfg": self.base_cfg}
+                                 "scan_stop": False, "cfg": self.base_cfg,
+                                 "autobrake": True, "brake": None, "braked": set()}
         send_lock = asyncio.Lock()
 
         async def send_json(obj: dict) -> None:
@@ -193,17 +243,55 @@ class App:
                     await ws.send_bytes(payload)
             return meta
 
+        async def reset_brake(forget: bool = True) -> None:
+            if state["brake"] is not None:
+                await send_json({"type": "brake", "cleared": True})
+            state["brake"] = None
+            if forget:
+                state["braked"] = set()
+
+        async def braking(meta: dict) -> float | None:
+            """Emergency braking of the virtual train; returns the virtual time
+            of this frame while braking (None = normal pace)."""
+            br: BrakeSim | None = state["brake"]
+            if br is not None and not br.done:
+                dt = br.advance(meta.get("displacement_m") or 0.0)
+                await send_json({"type": "brake", **br.public()})
+                return dt
+            if br is not None or not state["autobrake"] or meta.get("status") != "OBSTACLE":
+                return None
+            ids = {o["track_id"] for o in meta.get("obstacles", [])}
+            v = (meta.get("speed_mps") or 0.0)
+            dist = meta.get("nearest_track_distance_m") or meta.get("nearest_distance_m")
+            if not ids - state["braked"] or v < 1.0 or not dist:
+                return None
+            state["braked"] |= ids
+            cfg = state["cfg"]
+            br = BrakeSim(v, dist, cfg.reaction_time, cfg.braking_deceleration)
+            state["brake"] = br
+            await send_json({"type": "brake", **br.public()})
+            return None
+
         async def player() -> None:
             try:
                 while state["playing"] and state["session"] is not None:
                     sess = state["session"]
+                    self.access.touch(ws)
                     t0 = time.perf_counter()
                     meta = await send_frame(sess)
                     if meta is None:
                         state["playing"] = False
                         await send_json({"type": "state", "playing": False, "ended": True})
                         break
-                    period = 0.1 / max(state["speed"], 0.05)
+                    speed = max(state["speed"], 0.05)
+                    period = 0.1 / speed
+                    dt = await braking(meta)
+                    if dt is not None:
+                        period = min(max(dt, 0.02), 1.5) / speed
+                        if state["brake"].done:   # the virtual train has stopped
+                            state["playing"] = False
+                            await send_json({"type": "state", "playing": False, "braked": True})
+                            break
                     await asyncio.sleep(max(0.0, period - (time.perf_counter() - t0)))
             except (ConnectionError, RuntimeError) as err:  # client went away
                 LOG.info("player stopped: %s", err)
@@ -254,7 +342,8 @@ class App:
                 save_cached_scan(self.cache, info, cfg_hash(cfg), items)
             await send_json({"type": "timeline", "items": items, "total": len(sess.reader), "done": True})
 
-        await send_json({"type": "hello", "mode": "playback", "bags": [b.public() for b in self.bags.values()]})
+        await send_json({"type": "hello", "mode": "playback", "bags": self.bags_public(), "token": seat["token"],
+                         "idle_min": round(self.access.idle_s / 60)})
         try:
             async for msg in ws:
                 if msg.type != WSMsgType.TEXT:
@@ -264,11 +353,15 @@ class App:
                 except ValueError:
                     continue
                 cmd = data.get("cmd")
+                self.access.touch(ws)
                 sess: BagSession | None = state["session"]
                 try:
                     if cmd == "open":
+                        await reset_brake()
                         await open_bag(data["bag"], int(data.get("index", 0)))
                     elif cmd == "play" and sess is not None:
+                        if state["brake"] is not None and state["brake"].done:
+                            await reset_brake(forget=False)   # release; the same object does not brake again
                         if not state["playing"]:
                             state["playing"] = True
                             state["task"] = asyncio.ensure_future(player())
@@ -278,8 +371,13 @@ class App:
                         await send_json({"type": "state", "playing": False})
                     elif cmd == "speed":
                         state["speed"] = float(data.get("value", 1.0))
+                    elif cmd == "autobrake":
+                        state["autobrake"] = bool(data.get("value", True))
+                        if not state["autobrake"]:
+                            await reset_brake()
                     elif cmd == "step" and sess is not None:
                         stop_player()
+                        await reset_brake()
                         target = sess.next_index - 1 + int(data.get("delta", 1))
                         if int(data.get("delta", 1)) != 1:
                             await loop.run_in_executor(self.pool, sess.seek, target)
@@ -287,6 +385,7 @@ class App:
                     elif cmd == "seek" and sess is not None:
                         was = state["playing"]
                         stop_player()
+                        await reset_brake()
                         await loop.run_in_executor(self.pool, sess.seek, int(data["index"]))
                         await send_frame(sess)
                         if was:
@@ -315,14 +414,172 @@ class App:
                         state["scan_stop"] = True
                     elif cmd == "feedback":
                         await send_json({"type": "journal", "entry": self.journal.add(data)})
+                    elif cmd == "list":
+                        await send_json({"type": "bags", "bags": self.bags_public()})
                 except (KeyError, ValueError, TypeError) as err:
                     await send_json({"type": "error", "message": str(err)})
         finally:
+            self.access.release(ws)
             stop_player()
             state["scan_stop"] = True
             if state["session"] is not None:
                 state["session"].close()
         return ws
+
+    # ---------------------------------------------------------------- upload
+    async def api_upload(self, request: web.Request) -> web.Response:
+        """New recording from the operator (session token) or the admin."""
+        if not self.access.token_ok(request.headers.get("X-Gabarit-Token")):
+            check_admin(request)
+        if self.upload_root is None:
+            raise web.HTTPForbidden(text="загрузка записей отключена")
+        try:
+            dest, name = await receive_upload(request, self.upload_root, self.max_upload, self.pool)
+        except ValueError as err:
+            return web.json_response({"ok": False, "error": str(err)}, status=400)
+        await asyncio.get_running_loop().run_in_executor(self.pool, self.rescan)
+        bag = next((b for b in self.bags_public() if b["id"] == f"uploads/{name}"), None)
+        LOG.info("uploaded recording %s (%s)", name, dest)
+        return web.json_response({"ok": True, "bag": bag})
+
+    # ---------------------------------------------------------------- admin
+    async def admin_page(self, request: web.Request) -> web.StreamResponse:
+        check_admin(request)
+        return web.FileResponse(STATIC / "admin.html")
+
+    def _versions(self) -> list[dict]:
+        try:
+            return json.loads(self.versions_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+
+    def _mlflow_running(self) -> bool:
+        url = mlops.ui_url()
+        host = url.split("//")[-1].split(":")[0].split("/")[0] or "127.0.0.1"
+        try:
+            port = int(url.rsplit(":", 1)[-1].split("/")[0])
+        except ValueError:
+            port = 80
+        try:
+            with socket.create_connection((host, port), timeout=0.3):
+                return True
+        except OSError:
+            return False
+
+    async def api_admin_status(self, request: web.Request) -> web.Response:
+        check_admin(request)
+        bags = []
+        for d in self.bags_public():
+            info = self.bags[d["id"]]
+            try:
+                size = sum(f.stat().st_size for f in Path(info.path).parent.glob("*.db3"))
+            except OSError:
+                size = 0
+            bags.append({**d, "size_mb": round(size / 2 ** 20), "path": str(Path(info.path).parent)})
+        ml = mlflow_status()
+        ml["running"] = self._mlflow_running()
+        return web.json_response({
+            "uptime_s": round(time.time() - self.started),
+            "sessions": self.access.public(), "max_users": self.access.max_users,
+            "idle_min": round(self.access.idle_s / 60), "refused": self.access.refused,
+            "bags": bags, "upload_root": str(self.upload_root) if self.upload_root else None,
+            "max_upload_gb": round(self.max_upload / 2 ** 30),
+            "config_yaml": config_yaml(self.base_cfg), "presets": list(PRESETS),
+            "mlflow": ml, "runs": mlops.recent_runs(), "versions": list(reversed(self._versions()))[:20],
+            "jobs": list(self.jobs.values())[-10:], "journal": len(self.journal.all()),
+        })
+
+    async def api_admin_kick(self, request: web.Request) -> web.Response:
+        check_admin(request)
+        n = await self.access.kick_all("Сеанс завершён администратором")
+        return web.json_response({"ok": True, "kicked": n})
+
+    async def api_admin_limit(self, request: web.Request) -> web.Response:
+        check_admin(request)
+        body = await request.json()
+        self.access.max_users = max(0, int(body.get("max_users", self.access.max_users)))
+        self.access.idle_s = max(60.0, float(body.get("idle_min", self.access.idle_s / 60)) * 60)
+        return web.json_response({"ok": True, "max_users": self.access.max_users})
+
+    async def api_admin_config(self, request: web.Request) -> web.Response:
+        """New detector parameters for the next sessions (optionally a new model version)."""
+        check_admin(request)
+        body = await request.json()
+        try:
+            if body.get("preset"):
+                cfg = Config().with_overrides(PRESETS[body["preset"]])
+            else:
+                cfg = parse_config(body.get("yaml", ""))
+        except (KeyError, ValueError, TypeError, yaml.YAMLError) as err:
+            return web.json_response({"ok": False, "error": f"ошибка в параметрах: {err}"}, status=400)
+        self.base_cfg = cfg
+        entry = None
+        if body.get("register", True):
+            entry = await asyncio.get_running_loop().run_in_executor(
+                self.pool, mlops.register_detector, cfg, str(body.get("note", "")))
+            vers = self._versions()
+            vers.append(entry)
+            self.versions_file.parent.mkdir(parents=True, exist_ok=True)
+            self.versions_file.write_text(json.dumps(vers[-100:], ensure_ascii=False, indent=1), encoding="utf-8")
+        return web.json_response({"ok": True, "version": entry, "config_yaml": config_yaml(cfg)})
+
+    async def api_admin_evaluate(self, request: web.Request) -> web.Response:
+        """Evaluate the current parameters on a recording in the background."""
+        check_admin(request)
+        body = await request.json()
+        info = self.bags.get(body.get("bag", ""))
+        if info is None:
+            return web.json_response({"ok": False, "error": "нет такой записи"}, status=404)
+        job_id = f"job{len(self.jobs) + 1}"
+        cfg = self.base_cfg
+        vers = self._versions()
+        cfg_version = (vers[-1].get("version") or vers[-1].get("config_file")) if vers else None
+        job = {"id": job_id, "bag": info.name, "state": "running", "done": 0, "total": 0, "result": None}
+        self.jobs[job_id] = job
+
+        def progress(done, total):
+            job["done"], job["total"] = done, total
+
+        def work():
+            res = mlops.evaluate_bag(info, cfg, progress)
+            return mlops.log_evaluation(res, cfg, str(cfg_version) if cfg_version else None)
+
+        async def run():
+            try:
+                job["result"] = await asyncio.get_running_loop().run_in_executor(self.pool, work)
+                job["state"] = "done"
+            except Exception as err:   # reported to the panel
+                job["state"], job["error"] = "error", str(err)[:300]
+
+        asyncio.ensure_future(run())
+        return web.json_response({"ok": True, "job": job})
+
+    async def api_admin_delete_bag(self, request: web.Request) -> web.Response:
+        check_admin(request)
+        bag_id = request.match_info["bag_id"]
+        if bag_id not in self.uploaded:
+            return web.json_response({"ok": False, "error": "удалять можно только загруженные записи"}, status=400)
+        folder = Path(self.bags[bag_id].path).parent
+        if self.upload_root is None or self.upload_root.resolve() not in folder.resolve().parents:
+            return web.json_response({"ok": False, "error": "запись вне папки загрузок"}, status=400)
+        shutil.rmtree(folder, ignore_errors=True)
+        await asyncio.get_running_loop().run_in_executor(self.pool, self.rescan)
+        return web.json_response({"ok": True})
+
+    async def api_admin_mlflow_start(self, request: web.Request) -> web.Response:
+        check_admin(request)
+        if not mlops.available():
+            return web.json_response({"ok": False, "error": "MLflow не установлен (pip install mlflow)"}, status=400)
+        if self._mlflow_running():
+            return web.json_response({"ok": True, "url": mlops.ui_url(), "already": True})
+        port = mlops.ui_url().rsplit(":", 1)[-1].split("/")[0]
+        self.mlflow_proc = subprocess.Popen([sys.executable, "-m", "gabarit", "mlflow", "--port", port],
+                                            cwd=str(PROJECT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(60):
+            await asyncio.sleep(0.5)
+            if self._mlflow_running():
+                break
+        return web.json_response({"ok": self._mlflow_running(), "url": mlops.ui_url()})
 
     def make(self) -> web.Application:
         app = web.Application(client_max_size=16 * 1024 * 1024)
@@ -332,6 +589,15 @@ class App:
         app.router.add_get("/api/journal", self.api_journal)
         app.router.add_get("/api/journal.csv", self.api_journal_csv)
         app.router.add_post("/api/feedback", self.api_feedback)
+        app.router.add_post("/api/upload", self.api_upload)
+        app.router.add_get("/admin", self.admin_page)
+        app.router.add_get("/api/admin/status", self.api_admin_status)
+        app.router.add_post("/api/admin/kick", self.api_admin_kick)
+        app.router.add_post("/api/admin/limit", self.api_admin_limit)
+        app.router.add_post("/api/admin/config", self.api_admin_config)
+        app.router.add_post("/api/admin/evaluate", self.api_admin_evaluate)
+        app.router.add_post("/api/admin/mlflow/start", self.api_admin_mlflow_start)
+        app.router.add_delete("/api/admin/bags/{bag_id:.+}", self.api_admin_delete_bag)
         app.router.add_get("/ws", self.ws)
         app.router.add_static("/static/", STATIC, show_index=False)
 
@@ -357,15 +623,24 @@ def main() -> int:
     ap.add_argument("--config", type=Path, default=None)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--uploads", type=Path, default=PROJECT / "data" / "uploads",
+                    help="folder for recordings uploaded from the interface (default: data/uploads)")
+    ap.add_argument("--max-users", type=int, default=int(os.environ.get("GABARIT_MAX_USERS", 1)),
+                    help="simultaneous users of the interface, 0 = unlimited (default: 1)")
+    ap.add_argument("--idle-min", type=float, default=10.0,
+                    help="an idle session is released after this many minutes (default: 10)")
+    ap.add_argument("--max-upload-gb", type=float, default=20.0)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     roots = args.data or [d for d in DEFAULT_DATA if d.exists()] or DEFAULT_DATA[:1]
     for d in roots:
         if not d.exists():
             LOG.warning("data directory %s does not exist: no bags to play", d)
-    app = App(roots, args.config)
+    app = App(roots, args.config, upload_root=args.uploads, max_users=args.max_users,
+              idle_s=args.idle_min * 60, max_upload_gb=args.max_upload_gb)
     LOG.info("found %d bags in %s", len(app.bags), ", ".join(str(d) for d in roots))
-    print(f"\n  Gabarit: откройте http://{'localhost' if args.host in ('0.0.0.0', '127.0.0.1') else args.host}:{args.port}\n")
+    host = 'localhost' if args.host in ('0.0.0.0', '127.0.0.1') else args.host
+    print(f"\n  Gabarit: откройте http://{host}:{args.port}   (администрирование: http://{host}:{args.port}/admin)\n")
     web.run_app(app.make(), host=args.host, port=args.port, print=None)
     return 0
 

@@ -46,6 +46,7 @@ export class Scene3D {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x070a0e, 120, 320);
+    this.renderer.setClearColor(0x070a0e, 1);
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 1000);
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
@@ -100,6 +101,17 @@ export class Scene3D {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / Math.max(h, 1);
     this.camera.updateProjectionMatrix();
+  }
+
+  setTheme(light) {
+    // background + fog, and tunnel points a bit darker on the light background
+    const bg = light ? 0xe4eaef : 0x070a0e;
+    this.renderer.setClearColor(bg, 1);
+    this.scene.fog.color.set(bg);
+    COLORS.other.set(light ? '#4c6883' : '#5b7a99');
+    COLORS.ground.set(light ? '#7b8594' : '#4b5563');
+    this.light = light;
+    if (this.lastPoints) this._fillPoints(this.lastPoints);
   }
 
   setCamera(mode) {
@@ -175,7 +187,10 @@ export class Scene3D {
       else if (this.colorMode === 'intensity') c.setHSL(0.62 - Math.min(p.inten[i] / 90, 1) * 0.62, 0.9, 0.5);
       else if (cls === 1) c.copy(COLORS.ground);
       else if (cls === 2) c.copy(COLORS.env);
-      else if (cls === 0) { const g = 0.45 + Math.min(Math.max(z / 5, 0), 1) * 0.35; c.setRGB(0.36 * g + 0.1, 0.48 * g + 0.1, 0.6 * g + 0.12); }
+      else if (cls === 0) {   // tunnel: brightness by height (darker points on the light theme)
+        const g = (this.light ? 0.2 : 0.45) + Math.min(Math.max(z / 5, 0), 1) * (this.light ? 0.3 : 0.35);
+        c.setRGB(0.36 * g + 0.1, 0.48 * g + 0.1, 0.6 * g + 0.12);
+      }
       if (cls >= 3) {
         const cc = cls === 4 ? COLORS.obst : COLORS.cand;
         hpos[3 * k] = f; hpos[3 * k + 1] = z; hpos[3 * k + 2] = -x;

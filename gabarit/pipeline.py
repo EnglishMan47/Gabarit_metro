@@ -99,7 +99,7 @@ class Pipeline:
         delta, speed = self.ego.update(lev, stamp)
         t2 = time.perf_counter()
         geo = track_coordinates(lev, track, cfg)
-        cands = detect(lev, cloud.ring, geo, track, cfg)
+        cands = detect(lev, cloud.ring, geo, track, cfg, cloud.split)
         t3 = time.perf_counter()
         tracks = self.tracker.update(cands, delta)
         t4 = time.perf_counter()

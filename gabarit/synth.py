@@ -28,7 +28,9 @@ SHAPES = {
     "barrel": ("cylinder", 0.6, 0.6, 0.9, -0.15),
     "trolley": ("box", 1.4, 1.0, 1.0, 0.0),
     "cable": ("cylinder", 0.05, 0.05, 1.6, 1.3),     # hanging piece of cable
+    "glass": ("glass", 1.2, 0.02, 1.8, 0.0),         # glass pane across the track: mostly transparent
 }
+GLASS_REFLECTION = 0.25   # share of beams that return a weak echo from the pane
 
 
 @dataclass
@@ -142,13 +144,19 @@ def inject(raw: RawCloud, obstacles: list[SyntheticObstacle], track: TrackModel,
             px = (ox - cx) * ct - (of - cf) * st
             pf = (ox - cx) * st + (of - cf) * ct
             pz = oz - z0
-            if kind == "box":
+            if kind in ("box", "glass"):
                 t = _ray_box(np.array([px, pf, pz]), np.column_stack((rx, rf, z2)), (w / 2, l / 2), h)
+                if kind == "glass":
+                    # most of the pulse passes through: only some beams echo from the
+                    # pane, as the first return of the firing (even column); the second
+                    # return (odd column) keeps the tunnel behind the glass
+                    echo = (rng.random(len(cs)) < GLASS_REFLECTION) & (cs % 2 == 0)
+                    t = np.where(echo, t, np.inf)
             else:
                 t = _ray_cylinder(np.array([px, pf, pz]), np.column_stack((rx, rf, z2)), w / 2, l / 2, h)
             better = t < hit_range[k, cs]
             hit_range[k, cs[better]] = t[better]
-            hit_int[k, cs[better]] = ob.intensity
+            hit_int[k, cs[better]] = 4.0 if kind == "glass" else ob.intensity
     use = np.isfinite(hit_range) & (hit_range < rng_cur)
     if not use.any():
         return raw, 0

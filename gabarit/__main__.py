@@ -5,6 +5,7 @@
     python -m gabarit evaluate DIR [--out DIR]       all bags: per-frame JSONL + summary
     python -m gabarit synthetic DIR [--out DIR]      detection range with synthetic obstacles
     python -m gabarit check                          environment and data check
+    python -m gabarit mlflow   [--port 5000]         MLflow server: evaluation runs and detector versions
 """
 
 from __future__ import annotations
@@ -88,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--config", default=None)
     w.add_argument("--host", default="127.0.0.1")
     w.add_argument("--port", default="8000")
+    w.add_argument("--max-users", default=None, help="simultaneous users, 0 = unlimited (default 1)")
+    w.add_argument("--uploads", default=None, help="folder for uploaded recordings (default data/uploads)")
     r = sub.add_parser("run", help="process one bag and print the decision per frame")
     r.add_argument("bag", help="bag directory or .db3 file")
     r.add_argument("--config", default=None)
@@ -99,6 +102,9 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("synthetic", help="detection range with synthetic obstacles")
     s.add_argument("data", nargs="?", default=str(DEFAULT_DATA))
     s.add_argument("rest", nargs=argparse.REMAINDER)
+    m = sub.add_parser("mlflow", help="MLflow tracking server with the project store (model management)")
+    m.add_argument("--host", default="127.0.0.1")
+    m.add_argument("--port", default="5000")
     c = sub.add_parser("check", help="check the environment and the data directory")
     c.add_argument("--data", default=str(DEFAULT_DATA))
     args = ap.parse_args(argv)
@@ -108,12 +114,19 @@ def main(argv: list[str] | None = None) -> int:
         sys.argv = ["web.server", "--host", args.host, "--port", args.port]
         for d in args.data or []:
             sys.argv += ["--data", d]
+        if args.max_users is not None:
+            sys.argv += ["--max-users", args.max_users]
+        if args.uploads:
+            sys.argv += ["--uploads", args.uploads]
         if args.config:
             sys.argv += ["--config", args.config]
         runpy.run_module("web.server", run_name="__main__")
         return 0
     if args.cmd == "run":
         return cmd_run(args)
+    if args.cmd == "mlflow":
+        from gabarit.mlops import serve_ui
+        return serve_ui(args.host, int(args.port))
     if args.cmd in ("evaluate", "synthetic"):
         script = ROOT / "scripts" / ("evaluate.py" if args.cmd == "evaluate" else "synthetic_eval.py")
         sys.argv = [str(script), args.data, *args.rest]

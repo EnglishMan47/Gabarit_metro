@@ -2,13 +2,31 @@ import { Scene3D } from '/static/js/scene.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 0) => (v === null || v === undefined || Number.isNaN(v) ? '—' : Number(v).toFixed(d));
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 const scene = new Scene3D($('scene'));
 const state = {
   ws: null, mode: 'playback', bags: [], bag: null, frames: 0, playing: false,
   frame: null, timeline: [], answered: new Map(), toastFor: null, seen: new Set(),
   perfHist: [], lastArrive: 0, fpsHist: [], shapes: {}, baseConfig: null,
+  token: null, brake: null, busy: false, noReconnect: false, pendingOpen: null,
 };
+
+// ------------------------------------------------------------------ modal
+function showModal(title, text, actions = [], progress = null) {
+  $('modalTitle').textContent = title;
+  $('modalText').textContent = text;
+  $('modalProgress').classList.toggle('hidden', progress === null);
+  if (progress !== null) $('modalBar').style.width = `${Math.round(progress * 100)}%`;
+  $('modalActions').innerHTML = '';
+  actions.forEach(([label, fn, primary]) => {
+    const b = document.createElement('button');
+    b.textContent = label; if (primary) b.className = 'primary';
+    b.onclick = fn; $('modalActions').appendChild(b);
+  });
+  $('modal').classList.remove('hidden');
+}
+function hideModal() { $('modal').classList.add('hidden'); }
 
 // ------------------------------------------------------------------ socket
 function connect() {
@@ -16,7 +34,10 @@ function connect() {
   ws.binaryType = 'arraybuffer';
   state.ws = ws;
   ws.onopen = () => { $('conn').className = 'conn on'; };
-  ws.onclose = () => { $('conn').className = 'conn off'; setTimeout(connect, 1500); };
+  ws.onclose = () => {
+    $('conn').className = 'conn off';
+    if (!state.noReconnect) setTimeout(connect, state.busy ? 10000 : 1500);
+  };
   ws.onmessage = (ev) => {
     if (typeof ev.data === 'string') onJson(JSON.parse(ev.data));
     else onFrame(ev.data);
@@ -34,19 +55,31 @@ function onJson(m) {
       document.querySelector('#tabs button[data-tab="test"]').classList.add('hidden');
       document.querySelector('#tabs button[data-tab="layers"]').click();
     }
+    state.busy = false; state.token = m.token || null; hideModal();
+    $('btnUpload').classList.toggle('hidden', m.mode === 'live');
     if (m.mode === 'playback') {
-      state.bags = m.bags;
-      const sel = $('bagSelect');
-      // grouped, readable titles; the technical bag name stays in the tooltip
-      const order = ['С препятствиями', 'Штатные проезды (без препятствий)', 'Синтетические препятствия'];
-      const groups = new Map();
-      m.bags.forEach((b) => { const g = b.group || 'Записи'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(b); });
-      const keys = [...groups.keys()].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
-      sel.innerHTML = keys.map((g) => `<optgroup label="${g}">${groups.get(g).map((b) =>
-        `<option value="${b.id}" title="${b.name} · ${b.frames} кадров">${b.title || b.name} · ${b.duration_s.toFixed(0)} с</option>`).join('')}</optgroup>`).join('');
-      const pref = m.bags.find((b) => b.name.includes('obstacle')) || m.bags[0];
-      if (pref) { sel.value = pref.id; openBag(pref.id); }
+      fillBags(m.bags);
+      const keep = state.bag && m.bags.find((b) => b.id === state.bag.id);
+      const pref = keep || m.bags.find((b) => b.name.includes('obstacle')) || m.bags[0];
+      if (pref) { $('bagSelect').value = pref.id; openBag(pref.id); }
     }
+  } else if (m.type === 'busy') {
+    state.busy = true;
+    showModal('Сервис занят',
+      `Сейчас с сервисом работает другой пользователь (${Math.max(1, Math.round(m.busy_for_s / 60))} мин). `
+      + `Одновременно работает ${m.max_users === 1 ? 'один пользователь' : m.max_users + ' пользователя'}: каждому сеансу `
+      + 'нужен свой процессор для обработки облаков в реальном времени. Повторная попытка каждые 10 секунд…');
+  } else if (m.type === 'kicked') {
+    state.noReconnect = true;
+    showModal('Сеанс завершён', `${m.reason}. Нажмите «Подключиться», чтобы продолжить работу.`,
+      [['Подключиться', () => { state.noReconnect = false; hideModal(); connect(); }, true]]);
+  } else if (m.type === 'bags') {
+    fillBags(m.bags);
+    if (state.pendingOpen) { $('bagSelect').value = state.pendingOpen; openBag(state.pendingOpen); state.pendingOpen = null; }
+    else if (state.bag) $('bagSelect').value = state.bag.id;
+  } else if (m.type === 'brake') {
+    state.brake = m.cleared ? null : m;
+    if (state.frame) { renderStatus(state.frame); drawRadar(state.frame); }
   } else if (m.type === 'opened') {
     state.bag = m.bag; state.frames = m.frames; state.timeline = new Array(m.frames).fill(null);
     state.seen.clear(); state.answered.clear();
@@ -111,8 +144,19 @@ function onFrame(buf) {
   maybeToast(meta);
 }
 
+function fillBags(bags) {
+  state.bags = bags;
+  // grouped, readable titles; the technical bag name stays in the tooltip
+  const order = ['С препятствиями', 'Штатные проезды (без препятствий)', 'Синтетические препятствия', 'Загруженные записи'];
+  const groups = new Map();
+  bags.forEach((b) => { const g = b.group || 'Записи'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(b); });
+  const keys = [...groups.keys()].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+  $('bagSelect').innerHTML = keys.map((g) => `<optgroup label="${g}">${groups.get(g).map((b) =>
+    `<option value="${b.id}" title="${b.name} · ${b.frames} кадров">${b.title || b.name} · ${b.duration_s.toFixed(0)} с</option>`).join('')}</optgroup>`).join('');
+}
+
 // ------------------------------------------------------------------ status
-const SHAPE_RU = { person: 'человек', child: 'ребёнок', box_50cm: 'ящик', box_30cm: 'предмет на рельсе', barrel: 'бочка', trolley: 'тележка', cable: 'кабель' };
+const SHAPE_RU = { person: 'человек', child: 'ребёнок', box_50cm: 'ящик', box_30cm: 'предмет на рельсе', barrel: 'бочка', trolley: 'тележка', cable: 'кабель', glass: 'стекло' };
 
 function renderStatus(m) {
   const card = $('statusCard'), vp = $('viewport');
@@ -130,17 +174,37 @@ function renderStatus(m) {
   } else if (m.status === 'DEGRADED') {
     cls = 'state-warn'; label = 'НЕТ ОПОРЫ ПУТИ'; main = '—'; sub = 'рельсы и стены не распознаны — проверьте установку лидара';
   }
+  const br = state.brake;
+  if (br) {
+    if (br.active) {
+      cls = 'state-bad'; label = 'ЭКСТРЕННОЕ ТОРМОЖЕНИЕ';
+      main = `${fmt(br.v_kmh, 0)} км/ч`;
+      sub = br.collision
+        ? `объект слишком близко: остановиться не успевает, скорость у препятствия ~${fmt(br.impact_kmh, 0)} км/ч`
+        : `остановка через ${fmt(Math.max(br.stop_m - br.travelled_m, 0), 0)} м, за ${fmt(br.gap_m, 0)} м до препятствия`;
+    } else if (br.stopped) {
+      cls = 'state-halt'; label = 'ПОЕЗД ОСТАНОВЛЕН';
+      main = `${fmt(br.gap_m, 0)} м`;
+      sub = `до препятствия · тормозной путь ${fmt(br.stop_m, 0)} м за ${fmt(br.time_s, 1)} с с ${fmt(br.v0_kmh, 0)} км/ч · ▶ — отпустить тормоз`;
+    } else {
+      cls = 'state-bad'; label = 'СТОЛКНОВЕНИЕ НЕ ПРЕДОТВРАЩЕНО';
+      main = `${fmt(br.impact_kmh, 0)} км/ч`;
+      sub = `объект обнаружен ближе тормозного пути (${fmt(br.stop_m, 0)} м); торможение снизило скорость с ${fmt(br.v0_kmh, 0)} км/ч`;
+    }
+  }
   card.className = `status-card ${cls}`;
   $('statusLabel').textContent = label; $('statusMain').textContent = main; $('statusSub').textContent = sub;
   const note = $('statusNote');
   note.classList.toggle('hidden', !m.turnout_ahead_m);
   if (m.turnout_ahead_m) note.textContent = `Стрелка через ${fmt(m.turnout_ahead_m, 0)} м: маршрут за ней не определён`;
-  vp.classList.toggle('alarm', m.status === 'OBSTACLE');
-  vp.classList.toggle('check', m.status === 'CHECK');
-  $('mSpeed').textContent = fmt(m.speed_kmh, 0);
+  const halted = br && !br.active;
+  vp.classList.toggle('alarm', m.status === 'OBSTACLE' && !halted);
+  vp.classList.toggle('check', m.status === 'CHECK' && !br);
+  vp.classList.toggle('halt', !!halted && br.stopped);
+  $('mSpeed').textContent = br ? fmt(br.v_kmh, 0) : fmt(m.speed_kmh, 0);
   $('mFree').textContent = fmt(m.free_distance_m, 0);
-  $('mStop').textContent = fmt(m.stopping_distance_m, 0);
-  $('mTtc').textContent = m.time_to_obstacle_s ? fmt(m.time_to_obstacle_s, 1) : '—';
+  $('mStop').textContent = br ? fmt(Math.max(br.stop_m - br.travelled_m, 0), 0) : fmt(m.stopping_distance_m, 0);
+  $('mTtc').textContent = !br && m.time_to_obstacle_s ? fmt(m.time_to_obstacle_s, 1) : '—';
   const fps = state.fpsHist.length ? state.fpsHist.reduce((a, b) => a + b, 0) / state.fpsHist.length : null;
   const ms = m.timing_ms.total;
   $('sysInfo').textContent = `обработка ${fmt(ms, 0)} мс` + (state.playing || state.mode === 'live' ? ` · ${fmt(fps, 1)} кадр/с` : '');
@@ -152,6 +216,7 @@ function renderStatus(m) {
 }
 
 function obKind(o) {
+  if (o.transparent) return 'прозрачный объект (стекло?)';
   if (o.low) return 'низкий объект на рельсе';
   const h = o.box.h[1];
   if (h > 1.2) return 'высокий объект (человек?)';
@@ -252,10 +317,11 @@ function drawRadar(m) {
   for (let x = X(obs) - 40 * k; x < R; x += 8 * k) { g.beginPath(); g.moveTo(x, y1); g.lineTo(x + 28 * k, y0); g.stroke(); }
   g.restore();
   // rails
-  g.strokeStyle = 'rgba(148,163,184,0.5)'; g.lineWidth = k;
+  g.strokeStyle = css('--muted'); g.globalAlpha = 0.5; g.lineWidth = k;
   [0.38, 0.62].forEach((f) => { const y = y0 + (y1 - y0) * f; g.beginPath(); g.moveTo(X(0), y); g.lineTo(X(maxS), y); g.stroke(); });
+  g.globalAlpha = 1;
   // ticks
-  g.fillStyle = '#7f93a8'; g.textAlign = 'center';
+  g.fillStyle = css('--muted'); g.textAlign = 'center';
   for (let s = 0; s <= maxS; s += 25) {
     g.fillRect(X(s), y1, k, 5 * k);
     g.fillText(`${s}`, X(s), y1 + 16 * k);
@@ -263,10 +329,16 @@ function drawRadar(m) {
   g.textAlign = 'left'; g.fillText('м', R + 4 * k, y1 + 16 * k);
   // stopping distance
   const stop = m.stopping_distance_m || 0;
-  if (stop > 1) {
-    g.strokeStyle = '#38bdf8'; g.setLineDash([4 * k, 3 * k]); g.lineWidth = 1.5 * k;
+  const info = css('--info');
+  const br = state.brake;
+  if (br && (br.active || br.stopped)) {   // where the braking train stops
+    const at = Math.max(br.stop_m - br.travelled_m, 0);
+    g.fillStyle = info; g.fillRect(X(at) - 2 * k, y0 - 6 * k, 4 * k, y1 - y0 + 8 * k);
+    if (!br.stopped) g.fillText(`остановка через ${at.toFixed(0)} м`, Math.min(X(at) + 6 * k, R - 130 * k), y0 - 10 * k);
+  } else if (stop > 1) {
+    g.strokeStyle = info; g.setLineDash([4 * k, 3 * k]); g.lineWidth = 1.5 * k;
     g.beginPath(); g.moveTo(X(stop), y0 - 8 * k); g.lineTo(X(stop), y1 + 2 * k); g.stroke(); g.setLineDash([]);
-    g.fillStyle = '#38bdf8'; g.fillText(`тормозной путь ${stop.toFixed(0)} м`, Math.min(X(stop) + 4 * k, R - 120 * k), y0 - 10 * k);
+    g.fillStyle = info; g.fillText(`тормозной путь ${stop.toFixed(0)} м`, Math.min(X(stop) + 4 * k, R - 120 * k), y0 - 10 * k);
   }
   // train
   g.fillStyle = '#3b82f6'; g.fillRect(L - 30 * k, y0 + 4 * k, 26 * k, y1 - y0 - 8 * k);
@@ -280,19 +352,20 @@ function drawRadar(m) {
     g.font = `bold ${13 * k}px Segoe UI, sans-serif`; g.fillText(`${o.distance_m.toFixed(1)} м`, X(o.s_m) + 10 * k, y0 - 8 * k);
     g.font = `${11 * k}px Segoe UI, sans-serif`;
   });
-  g.fillStyle = '#7f93a8'; g.font = `${11 * k}px Segoe UI, sans-serif`;
+  g.fillStyle = css('--muted'); g.font = `${11 * k}px Segoe UI, sans-serif`;
   g.fillText('схема пути · заливка — проверенный участок', 12 * k, 16 * k);
   void tr;
 }
 
 // ------------------------------------------------------------------ timeline
-const TL_COLORS = { CLEAR: '#14532d', CHECK: '#b45309', OBSTACLE: '#dc2626', DEGRADED: '#475569' };
+const tlColors = () => ({ CLEAR: css('--tl-clear'), CHECK: css('--tl-check'), OBSTACLE: css('--tl-obst'), DEGRADED: css('--muted') });
 function drawTimeline() {
   const cv = $('timeline'), g = cv.getContext('2d');
   const k = devicePixelRatio, W = cv.width = cv.clientWidth * k, H = cv.height = cv.clientHeight * k;
   g.clearRect(0, 0, W, H);
   const n = state.frames || 1;
   const bw = W / n;
+  const TL_COLORS = tlColors();
   state.timeline.forEach((it, i) => {
     if (!it) return;
     g.fillStyle = TL_COLORS[it.status] || '#334155';
@@ -308,9 +381,9 @@ function drawTimeline() {
   const cur = state.mode === 'live' ? state.timeline.length - 1 : state.frame && state.frame.frame;
   if (cur !== undefined && cur !== null && cur >= 0) {
     const x = (cur + 0.5) * bw;
-    g.fillStyle = '#e2e8f0'; g.fillRect(x - k, 0, 2 * k, H - 12 * k);
+    g.fillStyle = css('--text'); g.fillRect(x - k, 0, 2 * k, H - 12 * k);
   }
-  g.fillStyle = '#7f93a8'; g.font = `${10 * k}px Segoe UI, sans-serif`;
+  g.fillStyle = css('--muted'); g.font = `${10 * k}px Segoe UI, sans-serif`;
   g.fillText(state.mode === 'live' ? 'последние 60 с · статус по кадрам · голубая линия — скорость (км/ч)'
     : 'статус по кадрам · голубая линия — скорость (км/ч)', 4 * k, H - 2 * k);
 }
@@ -343,7 +416,7 @@ function renderPerf(m) {
   g.strokeStyle = '#38bdf8'; g.lineWidth = 1.5 * k; g.beginPath();
   state.perfHist.forEach((v, i) => { const x = i / 150 * W; if (i) g.lineTo(x, y(v)); else g.moveTo(x, y(v)); });
   g.stroke();
-  g.fillStyle = '#7f93a8'; g.font = `${10 * k}px sans-serif`; g.fillText('100 мс', 4 * k, y(100) - 3 * k);
+  g.fillStyle = css('--muted'); g.font = `${10 * k}px sans-serif`; g.fillText('100 мс', 4 * k, y(100) - 3 * k);
 }
 
 // ------------------------------------------------------------------ journal
@@ -411,6 +484,51 @@ $('pReset').onclick = () => {
   [['pWidth', 2.2], ['pHeight', 3.0], ['pMinH', 0.12], ['pRange', 200]].forEach(([id, v]) => { $(id).value = v; $(id).dispatchEvent(new Event('input')); });
   send({ cmd: 'config', overrides: {} });
 };
+
+// ------------------------------------------------------------------ theme
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('gabarit-theme', t); } catch (e) { /* private mode */ }
+  $('btnTheme').innerHTML = t === 'light' ? '&#9790;' : '&#9788;';
+  scene.setTheme(t === 'light');
+  if (state.frame) { drawRadar(state.frame); renderPerf(state.frame); }
+  drawTimeline();
+}
+$('btnTheme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+applyTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+
+// ------------------------------------------------------------------ upload of a recording
+$('btnUpload').onclick = () => $('uploadInput').click();
+$('uploadInput').onchange = () => {
+  const files = [...$('uploadInput').files];
+  $('uploadInput').value = '';
+  if (!files.length) return;
+  const fd = new FormData();
+  files.forEach((f) => fd.append('file', f, f.name));
+  const total = files.reduce((a, f) => a + f.size, 0);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  if (state.token) xhr.setRequestHeader('X-Gabarit-Token', state.token);
+  xhr.upload.onprogress = (e) => showModal('Загрузка записи',
+    `${files.map((f) => f.name).join(', ')} — ${(e.loaded / 2 ** 20).toFixed(0)} из ${(total / 2 ** 20).toFixed(0)} МБ`, [],
+    e.lengthComputable ? e.loaded / e.total : 0);
+  xhr.onload = () => {
+    let r = {};
+    try { r = JSON.parse(xhr.responseText); } catch (e) { /* not json */ }
+    if (xhr.status === 200 && r.ok) {
+      hideModal();
+      state.pendingOpen = r.bag ? r.bag.id : null;
+      send({ cmd: 'list' });
+    } else {
+      showModal('Запись не загружена', r.error || `ошибка ${xhr.status}`, [['Закрыть', hideModal, true]]);
+    }
+  };
+  xhr.onerror = () => showModal('Запись не загружена', 'соединение прервано', [['Закрыть', hideModal, true]]);
+  showModal('Загрузка записи', files.map((f) => f.name).join(', '), [], 0);
+  xhr.send(fd);
+};
+
+$('autoBrake').onchange = (e) => send({ cmd: 'autobrake', value: e.target.checked });
 
 document.addEventListener('keydown', (e) => {
   if (['INPUT', 'SELECT'].includes(document.activeElement.tagName)) return;

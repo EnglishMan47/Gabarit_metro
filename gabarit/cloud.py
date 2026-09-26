@@ -32,13 +32,17 @@ class Cloud:
     raw_count: int
     rings: int
     columns: int
+    # first return of a firing whose second return lies >= 1.5 m farther: the
+    # beam went partly through something (glass, film, a thin edge)
+    split: np.ndarray | None = None
 
     def __len__(self) -> int:
         return len(self.xyz)
 
     def subset(self, mask: np.ndarray) -> "Cloud":
         return Cloud(self.stamp, self.frame_id, self.xyz[mask], self.intensity[mask], self.ring[mask],
-                     self.column[mask], self.raw_count, self.rings, self.columns)
+                     self.column[mask], self.raw_count, self.rings, self.columns,
+                     None if self.split is None else self.split[mask])
 
 
 def working_set(cloud: Cloud, max_range: float = 205.0) -> np.ndarray:
@@ -106,6 +110,32 @@ def estimate_rings(x: np.ndarray, y: np.ndarray, z: np.ndarray, valid: np.ndarra
     return out
 
 
+def dual_return_split(r2: np.ndarray, valid: np.ndarray, rings: int, columns: int, gap: float = 1.5) -> np.ndarray:
+    """Points that are the nearer of the two returns of one firing with the
+    other return at least ``gap`` metres farther.
+
+    In the dual-return mode neighbouring columns (2k, 2k+1) are the two
+    returns of the same firing and coincide on solid surfaces. A transparent
+    or semi-transparent obstacle (glass, film) reflects a weak part of the
+    pulse and lets the rest through to the tunnel behind it: the returns split.
+    """
+    n = len(r2)
+    out = np.zeros(n, bool)
+    if columns < 2 or n != rings * columns:
+        return out
+    r = np.sqrt(np.where(valid, r2, np.inf)).reshape(columns, rings)
+    pairs = columns // 2
+    a, b = r[0:2 * pairs:2], r[1:2 * pairs:2]
+    ok = np.isfinite(a) & np.isfinite(b)
+    diff = np.where(ok, b - np.where(ok, a, 0.0), 0.0) if ok.any() else np.zeros_like(a)
+    near_a = ok & (diff >= gap)
+    near_b = ok & (-diff >= gap)
+    m = np.zeros((columns, rings), bool)
+    m[0:2 * pairs:2] = near_a
+    m[1:2 * pairs:2] = near_b
+    return m.reshape(-1)
+
+
 def from_raw(raw: RawCloud, forward_axis: str = "-y", min_range: float = 1.0) -> Cloud:
     arr = raw.points
     names = arr.dtype.names or ()
@@ -132,9 +162,11 @@ def from_raw(raw: RawCloud, forward_axis: str = "-y", min_range: float = 1.0) ->
         organized = False
     columns = n // rings if organized else 0
     col_all = (np.arange(n, dtype=np.int32) // rings) if organized else np.full(n, -1, np.int32)
+    split = dual_return_split(r2, valid, rings, columns) if organized else np.zeros(n, bool)
     xyz = np.column_stack((lat[valid], fwd[valid], up[valid])).astype(np.float32, copy=False)
     if "intensity" in names:
         inten = np.asarray(arr["intensity"], dtype=np.float32)[valid]
     else:
         inten = np.zeros(len(xyz), np.float32)
-    return Cloud(raw.stamp, raw.frame_id, xyz, inten, ring_all[valid], col_all[valid], n, rings, columns)
+    return Cloud(raw.stamp, raw.frame_id, xyz, inten, ring_all[valid], col_all[valid], n, rings, columns,
+                 split[valid])

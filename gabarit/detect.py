@@ -79,6 +79,7 @@ class Candidate:
     rejected: str | None = None
     point_index: np.ndarray | None = None  # indices into the frame cloud
     low: bool = False        # low object on / between the rails (needs longer confirmation)
+    transparent: bool = False  # most returns are split dual echoes: glass / film
 
     @property
     def size(self) -> tuple[float, float, float]:
@@ -102,6 +103,7 @@ class Candidate:
             "reasons": self.reasons,
             "rejected": self.rejected,
             "low": self.low,
+            "transparent": self.transparent,
         }
 
 
@@ -181,7 +183,13 @@ def expected_points(width: float, height: float, rng: float, returns: int = 2) -
     return max(cols, 1.0) * max(rows, 1.0) * returns
 
 
-def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, track: TrackModel, cfg: Config) -> list[Candidate]:
+# rejections that only mean "too little evidence": a semi-transparent object
+# gives few, weak returns, so for it these are overruled
+_WEAK = ("sparse", "low_score", "far_weak", "floating", "pole_far")
+
+
+def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, track: TrackModel, cfg: Config,
+                     split: np.ndarray | None = None) -> list[Candidate]:
     det = cfg.detection
     env = cfg.envelope
     half = geo.half_width
@@ -333,14 +341,29 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
         cand.reasons = reasons
         if cand.rejected is None and cand.score < det.min_score:
             cand.rejected = "low_score"
+        if split is not None and split.size:
+            # transparent obstacle: the laser pulse is partly reflected by the
+            # object and partly passes through to the tunnel (dual echo split)
+            n_split = int(split[idx_in].sum())
+            # (far away split echoes are mostly edges of the tunnel structure)
+            # (a few split echoes at the envelope boundary are edges of the platform / wall
+            # equipment; a pane across the track gives many, inside the envelope)
+            if (n_split >= 5 and n_split >= 0.5 * n_in and rings >= 2 and cand.s_far - cand.s_near < 1.0
+                    and cand.s_near <= det.transparent_max_range and float(np.abs(di).min()) < half - 0.3):
+                cand.transparent = True
+                cand.reasons.append(f"прозрачный объект: {n_split} лучей частично проходят насквозь")
+                if cand.rejected in _WEAK:
+                    cand.rejected = None
+                    cand.score = max(cand.score, det.min_score + 0.1)
         cands.append(cand)
     cands.sort(key=lambda c: (c.rejected is not None, c.s_near))
     return cands[: det.max_clusters * 2]
 
 
-def detect(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, track: TrackModel, cfg: Config) -> list[Candidate]:
+def detect(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, track: TrackModel, cfg: Config,
+           split: np.ndarray | None = None) -> list[Candidate]:
     """All candidates of one frame: envelope clusters + objects lying on the rails."""
-    cands = _detect_envelope(lev, ring, geo, track, cfg)
+    cands = _detect_envelope(lev, ring, geo, track, cfg, split)
     rail = detect_rail_objects(lev, ring, geo, track, cfg)
     for rc in rail:
         clash = any(c.rejected is None and abs(c.s_near - rc.s_near) < 1.5 and abs(c.lateral - rc.lateral) < 0.6

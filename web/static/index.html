@@ -6,6 +6,7 @@
 <title>Габарит — контроль пути по лидару</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='3' width='24' height='26' rx='5' fill='none' stroke='%2322c55e' stroke-width='3'/%3E%3Cpath d='M10 24 L16 8 L22 24' fill='none' stroke='%2322c55e' stroke-width='3'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/styles.css">
+<script>try { const t = localStorage.getItem('gabarit-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <script type="importmap">
 { "imports": { "three": "/static/vendor/three.module.js" } }
 </script>
@@ -21,6 +22,8 @@
   </div>
   <div class="transport" id="transport">
     <select id="bagSelect" title="Запись проезда (ROS 2 bag)"></select>
+    <button class="topbtn" id="btnUpload" title="Загрузить свою запись: .db3 (ROS 2 bag, sqlite3), можно вместе с metadata.yaml, или архив .zip / .tar">&#43; Загрузить</button>
+    <input type="file" id="uploadInput" class="hidden" multiple accept=".db3,.yaml,.zip,.tar,.tgz,.gz">
     <button class="icon" id="btnPrev" title="Кадр назад (←)">&#9664;&#9664;</button>
     <button class="icon primary" id="btnPlay" title="Воспроизвести / пауза (пробел)">&#9654;</button>
     <button class="icon" id="btnNext" title="Кадр вперёд (→)">&#9654;&#9654;</button>
@@ -31,6 +34,8 @@
     <div class="framebox"><span id="frameLabel">—</span><span id="timeLabel"></span></div>
   </div>
   <div class="live-badge hidden" id="liveBadge"><span class="dot"></span>LIVE · ROS 2</div>
+  <button class="topbtn" id="btnTheme" title="Светлая / тёмная тема">&#9788;</button>
+  <a class="btn topbtn" href="/admin" target="_blank" title="Панель администратора: пользователи, записи, параметры, MLflow">Админ</a>
   <div class="sys" id="sysInfo" title="Время обработки кадра на сервере и частота кадров (цель: не более 100 мс, 10 кадров/с)">—</div>
   <div class="conn" id="conn" title="Соединение с сервером">●</div>
 </header>
@@ -101,6 +106,7 @@
           <option value="barrel">Бочка 0,6×0,9 м</option>
           <option value="trolley">Тележка 1,4×1,0×1,0 м</option>
           <option value="cable">Свисающий кабель</option>
+          <option value="glass">Стекло 1,2×1,8 м (прозрачное)</option>
         </select>
       </label>
       <label>Расстояние: <b id="synDistVal">120</b> м
@@ -153,6 +159,8 @@
       <label>Предел анализа: <b id="pRangeVal">200</b> м
         <input type="range" id="pRange" min="60" max="200" step="10" value="200"></label>
       <div class="row"><button class="primary" id="pApply">Применить</button><button id="pReset">Сбросить</button></div>
+      <label class="check"><input type="checkbox" id="autoBrake" checked> Автоторможение в демонстрации</label>
+      <p class="hint">При подтверждённой тревоге виртуальный поезд сразу начинает экстренное торможение: запись замедляется и останавливается там, где остановился бы поезд. ▶ — отпустить тормоз.</p>
       <div class="calib" id="calibBox"></div>
     </div>
 
@@ -178,6 +186,15 @@
   </div>
   <canvas id="timeline" class="timeline"></canvas>
 </footer>
+
+<div class="modal hidden" id="modal">
+  <div class="modal-card">
+    <h2 id="modalTitle"></h2>
+    <p id="modalText"></p>
+    <div class="progress hidden" id="modalProgress"><i id="modalBar"></i></div>
+    <div class="row" id="modalActions"></div>
+  </div>
+</div>
 
 <script type="module" src="/static/js/main.js"></script>
 </body>

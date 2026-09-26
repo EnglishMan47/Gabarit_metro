@@ -74,6 +74,7 @@ class DetectionConfig:
     ceiling_margin: float = 0.35
     wall_attach_margin: float = 0.35
     wall_line_gap: float = 0.5     # beyond the rails: closer to a tracked wall = wall equipment
+    transparent_max_range: float = 100.0   # split dual echoes are trusted as glass up to this range
     max_clusters: int = 32
     # low objects on the rails (e.g. 300x300x100 mm): stricter temporal check
     low_max_height: float = 0.45
@@ -105,9 +106,12 @@ class Config:
     envelope: EnvelopeConfig = field(default_factory=EnvelopeConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
-    # Deceleration used only for the informative stopping-distance estimate.
-    braking_deceleration: float = 1.1
-    reaction_time: float = 1.5
+    # Emergency braking of a driverless train on an obstacle alarm: the system
+    # latency from the confirmed alarm to the brake command, and the
+    # deceleration with the emergency (rail) brakes. Used for the stopping
+    # distance shown to the operator and for the braking of the demo player.
+    braking_deceleration: float = 2.5
+    reaction_time: float = 0.3
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -176,6 +176,76 @@ class BagSession:
             return pack_frame(res, meta), meta
 
 
+class BrakeSim:
+    """Emergency braking of the virtual train in the demo player.
+
+    The recording cannot be changed, but it can be replayed slower: every frame
+    moves the real train by ``dx``; the virtual train covers the same ``dx`` at
+    its own, decreasing speed, which gives the virtual time of the frame. The
+    player sleeps that long, so the scene visibly decelerates and stops exactly
+    where the braking train would stop (or at the obstacle, if it is too close).
+    """
+
+    def __init__(self, v0: float, obstacle_m: float, reaction_s: float, decel: float, margin_m: float = 1.0):
+        self.v0 = float(v0)
+        self.v = float(v0)
+        self.reaction_s = float(reaction_s)
+        self.decel = float(decel)
+        self.obstacle_m = float(obstacle_m)
+        self.reaction_m = self.v0 * self.reaction_s
+        self.stop_m = self.reaction_m + self.v0 * self.v0 / (2 * self.decel)
+        self.limit_m = max(self.obstacle_m - margin_m, 0.0)
+        self.collision = self.stop_m > self.limit_m
+        self.x = 0.0
+        self.t = 0.0
+        self.done = False
+
+    @property
+    def impact_kmh(self) -> float:
+        """Speed at the obstacle if the train cannot stop in time."""
+        if not self.collision:
+            return 0.0
+        d = self.limit_m - self.reaction_m
+        if d <= 0:
+            return self.v0 * 3.6
+        return math.sqrt(max(self.v0 * self.v0 - 2 * self.decel * d, 0.0)) * 3.6
+
+    def advance(self, dx: float) -> float:
+        """Move the virtual train by ``dx`` metres; returns the virtual time spent."""
+        if self.done:
+            return 0.0
+        dx = max(float(dx), 0.0)
+        if self.x + dx >= self.limit_m:           # reached the obstacle
+            dx = self.limit_m - self.x
+            self.done = True
+        dt = 0.0
+        if self.x < self.reaction_m:               # reaction: constant speed
+            step = min(dx, self.reaction_m - self.x)
+            dt += step / max(self.v, 1e-3)
+            self.x += step
+            dx -= step
+        if dx > 0:                                 # braking: v^2 = v0^2 - 2 a s
+            v2 = self.v * self.v - 2 * self.decel * dx
+            v_new = math.sqrt(v2) if v2 > 0 else 0.0
+            dt += (self.v - v_new) / self.decel
+            self.x += dx if v2 > 0 else self.v * self.v / (2 * self.decel)
+            self.v = v_new
+            if v_new == 0.0:
+                self.done = True
+        self.t += dt
+        return dt
+
+    def public(self) -> dict:
+        return {
+            "active": not self.done, "stopped": self.done and not self.collision,
+            "collision": self.collision, "v_kmh": round(self.v * 3.6, 1), "v0_kmh": round(self.v0 * 3.6, 1),
+            "travelled_m": round(self.x, 1), "stop_m": round(self.stop_m, 1),
+            "obstacle_m": round(self.obstacle_m, 1),
+            "gap_m": round(max(self.obstacle_m - self.stop_m, 0.0), 1),
+            "impact_kmh": round(self.impact_kmh, 1), "time_s": round(self.t, 1),
+        }
+
+
 def scan_bag(info: BagInfo, cfg: Config, progress=None, stop_flag=None) -> list[dict]:
     """Fast pass over the whole bag for the timeline (no point payload)."""
     reader = BagReader(info)

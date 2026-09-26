@@ -21,3 +21,6 @@ results/
 
 # local tool settings (Claude Code)
 .claude/
+
+# task statement of the organizers (kept locally)
+5. ДепТранспорта.pdf
