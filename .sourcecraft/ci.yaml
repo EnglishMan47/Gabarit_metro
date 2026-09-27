@@ -1,0 +1,72 @@
+# CI/CD of the solution in SourceCraft.
+#
+#   check    every push to main: unit tests and a detector run on a generated
+#            recording (synthetic tunnel, 26-byte points with ring and timestamp)
+#   run-bag  manual run (CI/CD -> "Новый запуск" -> run-bag): the detector on any
+#            recording by link (.db3, .zip, .tar, .zst; direct or Yandex Disk);
+#            with an empty link - on the generated recording
+#
+# Reports are published as artifacts of the run (folder results/).
+on:
+  push:
+    - workflows: [check]
+      filter:
+        branches: ["main"]
+
+workflows:
+  check:
+    settings:
+      max_cube_duration: 30m
+    tasks:
+      - name: check
+        cubes:
+          - name: tests-and-sample-run
+            image: docker.io/library/python:3.11-slim
+            env:
+              OPENBLAS_NUM_THREADS: "1"
+              OMP_NUM_THREADS: "1"
+            script:
+              - pip install --no-cache-dir -q -r requirements-dev.txt
+              - mkdir -p results
+              - python -m pytest -q tests 2>&1 | tee results/tests.txt
+              - python scripts/make_sample_bag.py work/sample
+              - python -m gabarit run work/sample | tee results/run.txt
+              - python scripts/evaluate.py work --out results/eval | tee results/summary.txt
+            artifacts:
+              paths:
+                - results
+
+  run-bag:
+    inputs:
+      bag_url:
+        type: string
+        required: false
+        default: ""
+        description: "Ссылка на запись: .db3, .zip, .tar или .zst, прямая или Яндекс Диск. Пусто - синтетическая запись"
+    settings:
+      max_cube_duration: 60m
+      shared: true
+    tasks:
+      - name: run-bag
+        cubes:
+          - name: detect
+            image: docker.io/library/python:3.11-slim
+            env:
+              OPENBLAS_NUM_THREADS: "1"
+              OMP_NUM_THREADS: "1"
+              BAG_URL: ${{ inputs.bag_url }}
+            script:
+              - apt-get update -qq && apt-get install -y -qq zstd > /dev/null
+              - pip install --no-cache-dir -q -r requirements.txt
+              - mkdir -p results
+              - |
+                if [ -n "$BAG_URL" ]; then
+                  python scripts/fetch_bag.py "$BAG_URL" work/bag
+                else
+                  python scripts/make_sample_bag.py work/bag
+                fi
+              - python -m gabarit check --data work
+              - python scripts/evaluate.py work --out results/eval | tee results/summary.txt
+            artifacts:
+              paths:
+                - results

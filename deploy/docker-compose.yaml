@@ -1,0 +1,19 @@
+# Cloud demo: web interface on a Yandex Cloud VM (Container Optimized Image).
+# __IMAGE__ and __ADMIN_PASSWORD__ are filled in by deploy/yc-setup.sh and by
+# the SourceCraft CI (.sourcecraft/ci.yaml) on every push to main.
+version: '3.7'
+services:
+  gabarit:
+    container_name: gabarit
+    image: "__IMAGE__"
+    command: ["gabarit", "web", "--uploads", "/data/uploads", "--max-users", "1"]
+    ports:
+      - "80:8000"
+    environment:
+      GABARIT_DATA: /data/bags
+      GABARIT_ADMIN_PASSWORD: "__ADMIN_PASSWORD__"
+    volumes:
+      - /var/lib/gabarit/bags:/data/bags                 # recordings copied by deploy/upload-bag.sh
+      - /var/lib/gabarit/uploads:/data/uploads           # recordings uploaded from the browser
+      - /var/lib/gabarit/artifacts:/opt/gabarit/artifacts  # journal, versions, scan cache
+    restart: always

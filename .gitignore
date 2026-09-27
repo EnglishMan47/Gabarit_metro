@@ -24,3 +24,7 @@ results/
 
 # task statement of the organizers (kept locally)
 5. ДепТранспорта.pdf
+
+# CI runs (.sourcecraft/ci.yaml)
+/work/
+/results/
