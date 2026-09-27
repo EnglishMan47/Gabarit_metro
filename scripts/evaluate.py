@@ -37,7 +37,8 @@ def events_from(frames: list[dict]) -> list[dict]:
     return sorted(ev.values(), key=lambda e: e["first_frame"])
 
 
-def run_bag(info, cfg: Config, step: int, stop: int | None, out_dir: Path | None, verbose: bool) -> dict:
+def run_bag(info, cfg: Config, step: int, stop: int | None, out_dir: Path | None, verbose: bool,
+            progress: int = 0) -> dict:
     reader = BagReader(info)
     pipe = Pipeline(cfg)
     frames = []
@@ -55,6 +56,11 @@ def run_bag(info, cfg: Config, step: int, stop: int | None, out_dir: Path | None
                                   "observed_until_m", "speed_kmh", "obstacles", "pending", "calibration", "timing_ms")}
         slim["candidates"] = [c for c in d["candidates"] if not c["rejected"]]
         frames.append(slim)
+        if progress and len(frames) % progress == 0:   # to stderr: stays visible when stdout is redirected
+            el = time.perf_counter() - t_start
+            left = (min(stop or len(reader), len(reader)) - i - 1) / step
+            print(f"   {info.name}: frame {i + 1}/{len(reader)}, {el:.0f} s, ~{el / len(frames) * left:.0f} s left",
+                  file=sys.stderr, flush=True)
         if verbose and (d["obstacle"] or d["pending"]):
             desc = "; ".join(f"#{o['track_id']} {o['distance_m']:.1f}m d={o['lateral_m']:+.2f} h={o['box']['h']} n={o['points']}"
                              for o in d["obstacles"] + d["pending"])
@@ -97,6 +103,7 @@ def main() -> int:
     ap.add_argument("--stop", type=int, default=None)
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--progress", type=int, default=0, help="print progress to stderr every N frames")
     args = ap.parse_args()
     cfg = Config.load(args.config)
     bags = discover_bags(args.data)
@@ -105,7 +112,8 @@ def main() -> int:
     report = {"config": cfg.to_dict(), "bags": []}
     for info in bags:
         print(f"== {info.name} ({info.frame_count} frames)")
-        s = run_bag(info, cfg, args.step, args.stop, args.out / "frames" if args.out else None, args.verbose)
+        s = run_bag(info, cfg, args.step, args.stop, args.out / "frames" if args.out else None, args.verbose,
+                    args.progress)
         report["bags"].append(s)
         print(f"   alarms {s['alarm_frames']}/{s['frames']} frames, events {s['event_count']}, "
               f"check {s['check_frames']}, observed~{s['observed_until_median_m']:.0f} m, "

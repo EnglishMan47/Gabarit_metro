@@ -60,6 +60,7 @@ workflows:
               OPENBLAS_NUM_THREADS: "1"
               OMP_NUM_THREADS: "1"
               BAG_URL: ${{ inputs.bag_url }}
+              PYTHONUNBUFFERED: "1"
             script:
               - apt-get update -qq && apt-get install -y -qq zstd > /dev/null
               - pip install --no-cache-dir -q -r requirements.txt
@@ -71,7 +72,7 @@ workflows:
                   python scripts/make_sample_bag.py work/bag
                 fi
               - python -m gabarit check --data work
-              - python scripts/evaluate.py work --out results/eval > results/summary.txt
+              - python scripts/evaluate.py work --out results/eval --progress 100 > results/summary.txt
               - cat results/summary.txt
             artifacts:
               paths:
