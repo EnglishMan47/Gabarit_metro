@@ -2,7 +2,7 @@
 
 Веб-интерфейс работает на виртуальной машине Yandex Compute Cloud (Container Optimized Image). Workflow `deploy-demo` (`deploy/ci-cloud.yaml`, после настройки облака переносится в `.sourcecraft/ci.yaml`) собирает Docker-образ при каждом push в `main`, отправляет его в Container Registry, и ВМ перезапускает контейнер с новым образом.
 
-Проверка и запуск решения в CI без облака описаны в разделе «CI/CD в SourceCraft» [обзора](../docs/reference/overview.md).
+Проверка и запуск решения в CI без облака описаны в разделе «CI/CD в SourceCraft» [README](../README.md).
 
 Почему ВМ, а не Serverless Containers: там запрос ограничен 3,5 МБ, а записи проездов — гигабайты, и обработка идёт через долгое WebSocket-соединение.
 
