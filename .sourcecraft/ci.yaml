@@ -28,10 +28,15 @@ workflows:
             script:
               - pip install --no-cache-dir -q -r requirements-dev.txt
               - mkdir -p results
-              - python -m pytest -q tests 2>&1 | tee results/tests.txt
+              # no pipes (| tee) here: a pipe would hide a failing command
+              - python -m pytest -q tests > results/tests.txt 2>&1 || { cat results/tests.txt; exit 1; }
+              - cat results/tests.txt
               - python scripts/make_sample_bag.py work/sample
-              - python -m gabarit run work/sample | tee results/run.txt
-              - python scripts/evaluate.py work --out results/eval | tee results/summary.txt
+              - python -m gabarit run work/sample > results/run.txt
+              - cat results/run.txt
+              - python scripts/evaluate.py work --out results/eval > results/summary.txt
+              - cat results/summary.txt
+              - grep -q "events 1," results/summary.txt || { echo "expected exactly one obstacle event"; exit 1; }
             artifacts:
               paths:
                 - results
@@ -66,7 +71,8 @@ workflows:
                   python scripts/make_sample_bag.py work/bag
                 fi
               - python -m gabarit check --data work
-              - python scripts/evaluate.py work --out results/eval | tee results/summary.txt
+              - python scripts/evaluate.py work --out results/eval > results/summary.txt
+              - cat results/summary.txt
             artifacts:
               paths:
                 - results
