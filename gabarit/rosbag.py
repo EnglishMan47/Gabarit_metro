@@ -145,7 +145,7 @@ _TITLES = {
     "roundT_pressureGate_roundT": "Гермозатвор на кривой · круглый тоннель",
     "roundT_squareT_pressureGate_squareT": "Смена сечения и гермозатвор · кривая",
     "squareT_platform_squareT_switch": "Платформа, стоянка, стрелочный перевод",
-    "cloud_with_fake_obj": "Синтетика организаторов · 10 объектов через ~100 м",
+    "cloud_with_fake_obj": "Испытательный проезд · 10 препятствий разного размера через ~100 м",
 }
 _WORDS = {
     "roundT": "круглый тоннель", "squareT": "прямоугольный тоннель", "doubleT": "двухпутный тоннель",

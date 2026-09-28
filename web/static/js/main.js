@@ -9,7 +9,7 @@ const state = {
   ws: null, mode: 'playback', bags: [], bag: null, frames: 0, playing: false,
   frame: null, timeline: [], answered: new Map(), toastFor: null, seen: new Set(),
   perfHist: [], lastArrive: 0, fpsHist: [], shapes: {}, baseConfig: null,
-  token: null, brake: null, busy: false, noReconnect: false, pendingOpen: null,
+  token: null, brake: null, autoBrake: true, exempt: new Set(), busy: false, noReconnect: false, pendingOpen: null,
 };
 
 // ------------------------------------------------------------------ modal
@@ -79,10 +79,14 @@ function onJson(m) {
     else if (state.bag) $('bagSelect').value = state.bag.id;
   } else if (m.type === 'brake') {
     state.brake = m.cleared ? null : m;
+    if (m.cleared && m.released) state.released = { how: m.released, until: performance.now() + 6000 };
+    if (m.cleared) state.exempt = new Set(m.exempt || []);
     if (state.frame) { renderStatus(state.frame); drawRadar(state.frame); }
+  } else if (m.type === 'hold_hint') {
+    flashHold();
   } else if (m.type === 'opened') {
     state.bag = m.bag; state.frames = m.frames; state.timeline = new Array(m.frames).fill(null);
-    state.seen.clear(); state.answered.clear();
+    state.seen.clear(); state.answered.clear(); state.exempt = new Set(); state.brake = null;
     drawTimeline(); $('tlEvents').innerHTML = ''; $('scanState').textContent = '';
   } else if (m.type === 'state') {
     state.playing = m.playing; $('btnPlay').innerHTML = m.playing ? '&#10074;&#10074;' : '&#9654;';
@@ -164,6 +168,11 @@ function renderStatus(m) {
   if (m.status === 'OBSTACLE') {
     const o = m.obstacles[0];
     cls = 'state-bad'; label = 'ПРЕПЯТСТВИЕ — ТОРМОЖЕНИЕ';
+    const ex = state.exempt || new Set();
+    if (!state.autoBrake) label = 'ПРЕПЯТСТВИЕ — ТОРМОЖЕНИЕ ВЫКЛЮЧЕНО';
+    else if (m.obstacles.length && m.obstacles.every((x) => ex.has(x.track_id))) {
+      cls = 'state-warn'; label = 'ОБЪЕКТ ПРОПУЩЕН ОПЕРАТОРОМ';
+    }
     main = `${fmt(m.nearest_distance_m, 1)} м`;
     const when = m.time_to_obstacle_s ? `через ${fmt(m.time_to_obstacle_s, 1)} с` : 'поезд стоит';
     sub = `ближайший из ${m.obstacles.length}: ${obKind(o)}, смещение ${fmt(o.lateral_m, 2)} м · ${when}`;
@@ -175,7 +184,19 @@ function renderStatus(m) {
     cls = 'state-warn'; label = 'НЕТ ОПОРЫ ПУТИ'; main = '—'; sub = 'рельсы и стены не распознаны — проверьте установку лидара';
   }
   const br = state.brake;
-  if (br) {
+  const rel = state.released && performance.now() < state.released.until ? state.released.how : '';
+  if (!br && rel === 'auto') {
+    sub = 'путь освободился — движение возобновлено автоматически';
+  } else if (!br && rel === 'override') {
+    sub = 'движение продолжено по решению оператора (записано в журнал)';
+  }
+  if (br && br.holding) {
+    cls = 'state-halt'; label = 'ПОЕЗД ОСТАНОВЛЕН — ПУТЬ ЗАНЯТ';
+    main = br.collision ? `${fmt(br.impact_kmh, 0)} км/ч у препятствия` : `${fmt(br.gap_m, 0)} м до препятствия`;
+    sub = br.collision
+      ? `объект обнаружен ближе тормозного пути (${fmt(br.stop_m, 0)} м); торможение снизило скорость с ${fmt(br.v0_kmh, 0)} км/ч`
+      : `тормозной путь ${fmt(br.stop_m, 0)} м за ${fmt(br.time_s, 1)} с с ${fmt(br.v0_kmh, 0)} км/ч`;
+  } else if (br) {
     if (br.active) {
       cls = 'state-bad'; label = 'ЭКСТРЕННОЕ ТОРМОЖЕНИЕ';
       main = `${fmt(br.v_kmh, 0)} км/ч`;
@@ -192,6 +213,18 @@ function renderStatus(m) {
       sub = `объект обнаружен ближе тормозного пути (${fmt(br.stop_m, 0)} м); торможение снизило скорость с ${fmt(br.v0_kmh, 0)} км/ч`;
     }
   }
+  const holding = !!(br && br.holding);
+  $('holdBox').classList.toggle('hidden', !holding);
+  if (holding) {
+    const ids = (br.hold_ids || []).map((x) => `№${x}`).join(', ');
+    $('holdText').innerHTML = `Поезд удерживается системой безопасности${ids ? ` (объект ${ids})` : ''}. `
+      + '<b>Ничего нажимать не нужно:</b> когда путь освободится, движение возобновится автоматически.<br>'
+      + 'Если вы <b>убедились</b> (камера, доклад машиниста или диспетчера), что объект не мешает движению, — '
+      + 'нажмите «Продолжить движение». Отметка «Ложная тревога» тормоз не отпускает.';
+  }
+  $('btnPlay').classList.toggle('held', holding);
+  $('btnPlay').title = holding ? 'Поезд удерживается: путь занят. Используйте «Продолжить движение» в карточке статуса'
+    : 'Воспроизвести / пауза (пробел)';
   card.className = `status-card ${cls}`;
   $('statusLabel').textContent = label; $('statusMain').textContent = main; $('statusSub').textContent = sub;
   const note = $('statusNote');
@@ -262,7 +295,7 @@ function answer(trackId, verdict) {
 }
 
 function toastText(o) {
-  return `<b>${fmt(o.distance_m, 1)} м</b> — ${obKind(o)}, смещение от оси ${fmt(o.lateral_m, 2)} м.<br>Подтвердите обнаружение: решение попадёт в журнал оператора.`;
+  return `<b>${fmt(o.distance_m, 1)} м</b> — ${obKind(o)}, смещение от оси ${fmt(o.lateral_m, 2)} м.<br>Подтвердите обнаружение: решение попадёт в журнал оператора. Торможение выполняется автоматически и от ответа не зависит.`;
 }
 
 function maybeToast(m) {
@@ -423,7 +456,7 @@ function renderPerf(m) {
 async function loadJournal() {
   try {
     const rows = await (await fetch('/api/journal')).json();
-    $('journal').innerHTML = rows.slice(-200).reverse().map((r) => `<div class="jrow"><span class="${r.verdict === 'confirmed' ? 'v-confirmed' : 'v-false'}">${r.verdict === 'confirmed' ? 'ПОДТВЕРЖДЕНО' : 'ЛОЖНАЯ ТРЕВОГА'}</span> · ${r.time.replace('T', ' ')}<br>${r.bag} · кадр ${r.frame} · №${r.track_id} · ${fmt(r.distance_m, 1)} м${r.synthetic ? ' · испытание' : ''}</div>`).join('') || '<span class="hint">решений оператора пока нет</span>';
+    $('journal').innerHTML = rows.slice(-200).reverse().map((r) => `<div class="jrow"><span class="${r.verdict === 'confirmed' ? 'v-confirmed' : 'v-false'}">${{ confirmed: 'ПОДТВЕРЖДЕНО', override: 'ДВИЖЕНИЕ ПРОДОЛЖЕНО ОПЕРАТОРОМ' }[r.verdict] || 'ЛОЖНАЯ ТРЕВОГА'}</span> · ${r.time.replace('T', ' ')}<br>${r.bag} · кадр ${r.frame} · №${r.track_id} · ${fmt(r.distance_m, 1)} м${r.synthetic ? ' · испытание' : ''}</div>`).join('') || '<span class="hint">решений оператора пока нет</span>';
   } catch (e) { /* offline */ }
 }
 
@@ -528,7 +561,37 @@ $('uploadInput').onchange = () => {
   xhr.send(fd);
 };
 
-$('autoBrake').onchange = (e) => send({ cmd: 'autobrake', value: e.target.checked });
+// braking mode on the main screen
+function setBrakeMode(auto) {
+  $('bmAuto').classList.toggle('on', auto);
+  $('bmOff').classList.toggle('on', !auto);
+  $('bmNote').classList.toggle('hidden', auto);
+  state.autoBrake = auto;
+  send({ cmd: 'autobrake', value: auto });
+}
+$('bmAuto').onclick = () => setBrakeMode(true);
+$('bmOff').onclick = () => {
+  showModal('Выключить торможение?',
+    'Поезд перестанет останавливаться перед подтверждёнными препятствиями — это режим просмотра записи, а не штатная работа. '
+    + 'Тревоги и журнал продолжат работать.',
+    [['Выключить', () => { hideModal(); setBrakeMode(false); }, true], ['Отмена', hideModal]]);
+};
+
+// held train: operator override
+function flashHold() {
+  const box = $('holdBox');
+  box.classList.remove('flash'); void box.offsetWidth; box.classList.add('flash');
+}
+$('btnResume').onclick = () => {
+  const br = state.brake;
+  if (!br || !br.holding) return;
+  const ids = (br.hold_ids || []).map((x) => `№${x}`).join(', ');
+  showModal('Продолжить движение при обнаруженном объекте?',
+    `Система видит на пути объект ${ids}. Продолжайте, только если убедились, что он не мешает движению `
+    + '(ложное срабатывание, объект убран за габарит). Решение будет записано в журнал от вашего имени. '
+    + 'Если впереди появится другое препятствие, поезд снова затормозит сам.',
+    [['Да, путь свободен — продолжить', () => { hideModal(); send({ cmd: 'resume' }); }, true], ['Отмена', hideModal]]);
+};
 
 document.addEventListener('keydown', (e) => {
   if (['INPUT', 'SELECT'].includes(document.activeElement.tagName)) return;

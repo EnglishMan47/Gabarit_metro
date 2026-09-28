@@ -42,7 +42,7 @@ from gabarit.rosbag import discover_bags
 from gabarit.synth import SHAPES
 from web.admin import (PRESETS, UPLOAD_GROUP, Access, check_admin, config_yaml, mlflow_status, parse_config,
                        receive_upload)
-from web.session import BagSession, BrakeSim, load_cached_scan, save_cached_scan, scan_bag
+from web.session import BagSession, BrakeGuard, load_cached_scan, save_cached_scan, scan_bag
 
 LOG = logging.getLogger("gabarit.web")
 ROOT = Path(__file__).resolve().parent
@@ -225,7 +225,7 @@ class App:
             return ws
         state: dict[str, Any] = {"session": None, "playing": False, "speed": 1.0, "task": None,
                                  "scan_stop": False, "cfg": self.base_cfg,
-                                 "autobrake": True, "brake": None, "braked": set()}
+                                 "autobrake": True, "guard": BrakeGuard(), "last_meta": None}
         send_lock = asyncio.Lock()
 
         async def send_json(obj: dict) -> None:
@@ -243,34 +243,60 @@ class App:
                     await ws.send_bytes(payload)
             return meta
 
+        guard: BrakeGuard = state["guard"]
+
+        async def send_brake() -> None:
+            if guard.brake is None and not guard.holding:
+                await send_json({"type": "brake", "cleared": True, "released": guard.last_release,
+                                 "exempt": sorted(guard.exempt)})
+            else:
+                await send_json({"type": "brake", **guard.public()})
+
         async def reset_brake(forget: bool = True) -> None:
-            if state["brake"] is not None:
-                await send_json({"type": "brake", "cleared": True})
-            state["brake"] = None
-            if forget:
-                state["braked"] = set()
+            had = guard.brake is not None or guard.holding
+            guard.reset(forget_exempt=forget)
+            guard.last_release = ""
+            if had:
+                await send_brake()
 
         async def braking(meta: dict) -> float | None:
             """Emergency braking of the virtual train; returns the virtual time
             of this frame while braking (None = normal pace)."""
-            br: BrakeSim | None = state["brake"]
+            br = guard.brake
             if br is not None and not br.done:
                 dt = br.advance(meta.get("displacement_m") or 0.0)
-                await send_json({"type": "brake", **br.public()})
+                if br.done:
+                    guard.hold(meta)
+                await send_brake()
                 return dt
-            if br is not None or not state["autobrake"] or meta.get("status") != "OBSTACLE":
+            if not state["autobrake"]:
                 return None
-            ids = {o["track_id"] for o in meta.get("obstacles", [])}
-            v = (meta.get("speed_mps") or 0.0)
-            dist = meta.get("nearest_track_distance_m") or meta.get("nearest_distance_m")
-            if not ids - state["braked"] or v < 1.0 or not dist:
-                return None
-            state["braked"] |= ids
             cfg = state["cfg"]
-            br = BrakeSim(v, dist, cfg.reaction_time, cfg.braking_deceleration)
-            state["brake"] = br
-            await send_json({"type": "brake", **br.public()})
+            if guard.start(meta, cfg.reaction_time, cfg.braking_deceleration) is not None:
+                await send_brake()
             return None
+
+        async def resume_play() -> None:
+            if not state["playing"] and state["session"] is not None:
+                state["playing"] = True
+                state["task"] = asyncio.ensure_future(player())
+            await send_json({"type": "state", "playing": True})
+
+        async def monitor_after_change() -> None:
+            """Held train: the scene changed (test objects removed) - watch a few
+            frames; if the track is clear the train moves on by itself."""
+            sess = state["session"]
+            for _ in range(8):
+                if not guard.holding or sess is None:
+                    return
+                meta = await send_frame(sess)
+                if meta is None:
+                    return
+                if guard.check_clear(meta):
+                    await send_brake()
+                    await resume_play()
+                    return
+            await send_brake()
 
         async def player() -> None:
             try:
@@ -285,10 +311,11 @@ class App:
                         break
                     speed = max(state["speed"], 0.05)
                     period = 0.1 / speed
+                    state["last_meta"] = meta
                     dt = await braking(meta)
                     if dt is not None:
                         period = min(max(dt, 0.02), 1.5) / speed
-                        if state["brake"].done:   # the virtual train has stopped
+                        if guard.holding:   # the virtual train has stopped and is held
                             state["playing"] = False
                             await send_json({"type": "state", "playing": False, "braked": True})
                             break
@@ -360,12 +387,26 @@ class App:
                         await reset_brake()
                         await open_bag(data["bag"], int(data.get("index", 0)))
                     elif cmd == "play" and sess is not None:
-                        if state["brake"] is not None and state["brake"].done:
-                            await reset_brake(forget=False)   # release; the same object does not brake again
-                        if not state["playing"]:
-                            state["playing"] = True
-                            state["task"] = asyncio.ensure_future(player())
-                        await send_json({"type": "state", "playing": True})
+                        if guard.holding:   # only the operator override releases a held train
+                            await send_json({"type": "hold_hint"})
+                            continue
+                        await resume_play()
+                    elif cmd == "resume" and sess is not None:
+                        # operator override: the object is not an obstacle, move on
+                        if guard.holding:
+                            meta = state["last_meta"] or {}
+                            ids = guard.override(meta)
+                            obs = {o["track_id"]: o for o in meta.get("obstacles", [])}
+                            for tid in sorted(ids):
+                                o = obs.get(tid, {})
+                                self.journal.add({"bag": sess.info.id, "frame": meta.get("frame"), "track_id": tid,
+                                                  "verdict": "override", "distance_m": o.get("distance_m"),
+                                                  "lateral_m": o.get("lateral_m"),
+                                                  "synthetic": bool(meta.get("synthetic")),
+                                                  "comment": "движение продолжено оператором при обнаруженном объекте"})
+                            await send_json({"type": "journal"})
+                            await send_brake()
+                            await resume_play()
                     elif cmd == "pause":
                         stop_player()
                         await send_json({"type": "state", "playing": False})
@@ -400,6 +441,8 @@ class App:
                     elif cmd == "clear_obstacles" and sess is not None:
                         sess.clear_obstacles()
                         await send_json({"type": "synthetic", "cleared": True})
+                        if guard.holding:
+                            await monitor_after_change()
                     elif cmd == "config":
                         cfg = self.base_cfg.with_overrides(data.get("overrides") or {})
                         state["cfg"] = cfg

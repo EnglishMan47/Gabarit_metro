@@ -77,6 +77,18 @@
       <div class="status-main" id="statusMain">—</div>
       <div class="status-sub" id="statusSub">выберите запись и нажмите ▶</div>
       <div class="status-note hidden" id="statusNote"></div>
+      <div class="hold-box hidden" id="holdBox">
+        <div id="holdText"></div>
+        <button class="resume" id="btnResume">Продолжить движение…</button>
+      </div>
+    </div>
+    <div class="brake-mode" title="Режим торможения поезда при подтверждённом препятствии">
+      <span>Торможение</span>
+      <div class="seg">
+        <button id="bmAuto" class="on">Автоматическое</button>
+        <button id="bmOff">Выключено</button>
+      </div>
+      <span class="bm-note hidden" id="bmNote">только просмотр записи — поезд не остановится</span>
     </div>
     <div class="metrics">
       <div class="metric"><span class="m-val" id="mSpeed">—</span><span class="m-lab">скорость, км/ч</span></div>
@@ -159,8 +171,6 @@
       <label>Предел анализа: <b id="pRangeVal">200</b> м
         <input type="range" id="pRange" min="60" max="200" step="10" value="200"></label>
       <div class="row"><button class="primary" id="pApply">Применить</button><button id="pReset">Сбросить</button></div>
-      <label class="check"><input type="checkbox" id="autoBrake" checked> Автоторможение в демонстрации</label>
-      <p class="hint">При подтверждённой тревоге виртуальный поезд сразу начинает экстренное торможение: запись замедляется и останавливается там, где остановился бы поезд. ▶ — отпустить тормоз.</p>
       <div class="calib" id="calibBox"></div>
     </div>
 

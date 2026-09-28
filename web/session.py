@@ -246,6 +246,81 @@ class BrakeSim:
         }
 
 
+class BrakeGuard:
+    """Safety logic around emergency braking (independent of the operator).
+
+    * A confirmed obstacle starts braking automatically; operator verdicts only
+      go to the journal.
+    * After the stop the train is held while the obstacle is on the track. It
+      moves on by itself once the track has been clear for ``clear_frames``
+      frames in a row.
+    * Only an explicit operator override ("continue: the object is not an
+      obstacle") releases a held train; the objects of that stop are then
+      exempt. Any other obstacle brakes the train again.
+    """
+
+    def __init__(self, clear_frames: int = 3):
+        self.clear_frames = clear_frames
+        self.brake: BrakeSim | None = None
+        self.holding = False
+        self.hold_ids: set[int] = set()
+        self.exempt: set[int] = set()
+        self.clear_count = 0
+        self.last_release = ""   # "auto" / "override" - shown once after a release
+
+    def threat(self, meta: dict) -> set[int]:
+        return {o["track_id"] for o in meta.get("obstacles", [])} - self.exempt
+
+    def reset(self, forget_exempt: bool = True) -> None:
+        self.brake, self.holding, self.hold_ids, self.clear_count = None, False, set(), 0
+        if forget_exempt:
+            self.exempt = set()
+
+    def start(self, meta: dict, reaction_s: float, decel: float) -> BrakeSim | None:
+        """Begin braking on a new obstacle (None if nothing to do)."""
+        if self.brake is not None or meta.get("status") != "OBSTACLE":
+            return None
+        ids = self.threat(meta)
+        v = meta.get("speed_mps") or 0.0
+        dist = meta.get("nearest_track_distance_m") or meta.get("nearest_distance_m")
+        if not ids or v < 1.0 or not dist:
+            return None
+        self.brake = BrakeSim(v, dist, reaction_s, decel)
+        self.hold_ids = set(ids)
+        self.last_release = ""
+        return self.brake
+
+    def hold(self, meta: dict) -> None:
+        """The virtual train has stopped: keep it standing."""
+        self.holding = True
+        self.hold_ids |= self.threat(meta)
+        self.clear_count = 0
+
+    def check_clear(self, meta: dict) -> bool:
+        """While holding: True (and released) once the track is clear."""
+        if not self.holding:
+            return False
+        self.clear_count = self.clear_count + 1 if not self.threat(meta) else 0
+        if self.clear_count >= self.clear_frames:
+            self.reset(forget_exempt=False)
+            self.last_release = "auto"
+            return True
+        return False
+
+    def override(self, meta: dict | None = None) -> set[int]:
+        """Operator decision: the held-for objects are not obstacles."""
+        ids = set(self.hold_ids) | (self.threat(meta) if meta else set())
+        self.exempt |= ids
+        self.reset(forget_exempt=False)
+        self.last_release = "override"
+        return ids
+
+    def public(self) -> dict:
+        out = self.brake.public() if self.brake is not None else {"active": False, "stopped": False}
+        out.update({"holding": self.holding, "hold_ids": sorted(self.hold_ids), "released": self.last_release})
+        return out
+
+
 def scan_bag(info: BagInfo, cfg: Config, progress=None, stop_flag=None) -> list[dict]:
     """Fast pass over the whole bag for the timeline (no point payload)."""
     reader = BagReader(info)
