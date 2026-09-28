@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 VM=${VM:-gabarit-demo}
 KEY=${SSH_KEY:-$HOME/.ssh/gabarit_demo}
 PASS=${GABARIT_ADMIN_PASSWORD:?set GABARIT_ADMIN_PASSWORD}
-BASE=ros:humble-ros-base-jammy
+BASE=mirror.gcr.io/library/python:3.11-slim
 
 REG=$(yc container registry get --name gabarit --format yaml | tr -d '\r' | awk '$1 == "id:" {print $2; exit}')
 ADDR=$(yc vpc address get --name gabarit-ip --format yaml | tr -d '\r' | awk '$1 == "address:" {print $2; exit}')
@@ -40,7 +40,7 @@ cd ~/gabarit-src
 # Docker Hub may be unreachable: fall back to the Google mirror of official images
 sudo docker image inspect "$BASE" >/dev/null 2>&1 || sudo docker pull "$BASE" \
   || { sudo docker pull "mirror.gcr.io/library/$BASE" && sudo docker tag "mirror.gcr.io/library/$BASE" "$BASE"; }
-sudo docker build -t "$IMAGE" .
+sudo docker build -f deploy/Dockerfile.web --build-arg BASE=mirror.gcr.io/library/python:3.11-slim -t "$IMAGE" .
 TOKEN=$(curl -sf -H Metadata-Flavor:Google \
   http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token \
   | sed -E 's/.*"access_token" *: *"([^"]+)".*/\1/')

@@ -6,11 +6,13 @@ services:
   gabarit:
     container_name: gabarit
     image: "__IMAGE__"
-    command: ["gabarit", "web", "--uploads", "/data/uploads", "--max-users", "1"]
+    # image of deploy/Dockerfile.web (web interface, no ROS); on the first start
+    # a synthetic demo recording with an obstacle is generated
+    entrypoint: ["/bin/sh", "-c", "[ -d /data/bags/sample_obstacle ] || python scripts/make_sample_bag.py /data/bags/sample_obstacle; exec python -m web.server --host 0.0.0.0 --port 8000 \"$$@\"", "--"]
+    command: ["--data", "/data/bags", "--uploads", "/data/uploads", "--max-users", "1"]
     ports:
       - "80:8000"
     environment:
-      GABARIT_DATA: /data/bags
       GABARIT_ADMIN_PASSWORD: "__ADMIN_PASSWORD__"
     volumes:
       - /var/lib/gabarit/bags:/data/bags                 # recordings copied by deploy/upload-bag.sh

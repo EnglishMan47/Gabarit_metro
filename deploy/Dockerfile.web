@@ -1,0 +1,27 @@
+# Web interface only (no ROS 2): the image of the cloud demo.
+#
+#   docker build -f deploy/Dockerfile.web -t gabarit-web .
+#   docker run --rm -p 8000:8000 -v /path/to/bags:/data/bags gabarit-web
+#
+# In the cloud Docker Hub and packages.ros.org may be unreachable: pass
+#   --build-arg BASE=mirror.gcr.io/library/python:3.11-slim
+ARG BASE=python:3.11-slim
+FROM ${BASE}
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    OMP_NUM_THREADS=1
+
+WORKDIR /opt/gabarit
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir -r requirements.txt
+COPY gabarit ./gabarit
+COPY web ./web
+COPY config ./config
+COPY scripts ./scripts
+COPY tests ./tests
+
+EXPOSE 8000
+ENTRYPOINT ["python", "-m", "web.server", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["--data", "/data/bags", "--uploads", "/data/uploads"]
