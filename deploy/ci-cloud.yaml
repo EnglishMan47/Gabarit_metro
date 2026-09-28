@@ -1,18 +1,12 @@
-# Cloud demo workflow: build the Docker image, push it to Container Registry and
-# roll it out to the demo VM (see deploy/README.md). Already merged into
-# .sourcecraft/ci.yaml; kept as a reference copy.
-on:
-  push:
-    - workflows: deploy-demo
-      filter:
-        branches: [main]
-
-tokens:
-  YC:
-    service_connection: gabarit-demo
-    scope: repo
-
+# Cloud demo workflow (reference, NOT active): build the Docker image, push it
+# to Container Registry and roll it out to the demo VM. In the hackathon
+# repository SourceCraft did not resolve repository secrets for this workflow
+# ("value 'YC_SA_KEY' not defined for value source 'secrets'"), so the image is
+# built on the VM itself: see deploy/README.md, deploy/vm-build.sh.
 workflows:
+  # Yandex Cloud access by an authorized key of the service account gabarit-ci
+  # (secret YC_SA_KEY): a service connection sees only the clouds of the
+  # organization of this SourceCraft repository.
   deploy-demo:
     settings:
       max_cube_duration: 45m
@@ -22,22 +16,20 @@ workflows:
           REGISTRY: cr.yandex/crpd9m3qa8n7gkrt5tt6
           IMAGE_NAME: gabarit
           VM_NAME: gabarit-demo
+          YC_FOLDER_ID: b1gd0h3nfq9us43uohvo
+          # secrets are resolved in task env (documented pattern), cubes read them from env
+          YC_SA_KEY: ${{ secrets.YC_SA_KEY }}
+          ADMIN_PASSWORD: ${{ secrets.GABARIT_ADMIN_PASSWORD }}
         cubes:
-          - name: get-iam-token
-            env:
-              ID_TOKEN: ${{ tokens.YC.id_token }}
-              YC_SA_ID: ${{ tokens.YC.service_account_id }}
-            image: cr.yandex/sourcecraft/yc-iam:latest
-
           - name: setup-buildx
             action: docker/setup-buildx-action@v3.11.1
 
           - name: login
             action: docker/login-action@v3.5.0
             with:
-              registry: ${{ env.REGISTRY }}
-              username: iam
-              password: ${{ cubes.get-iam-token.outputs.IAM_TOKEN }}
+              registry: cr.yandex
+              username: json_key
+              password: ${{ env.YC_SA_KEY }}
 
           - name: build-and-push
             action: docker/build-push-action@v6.18.0
@@ -53,25 +45,24 @@ workflows:
           # VM agent pull the new image and recreate the container
           - name: deploy
             env:
-              YC_FOLDER_ID: ${{ tokens.YC.folder_id }}
-              YC_IAM_TOKEN: ${{ cubes.get-iam-token.outputs.IAM_TOKEN }}
               DIGEST: ${{ cubes.build-and-push.outputs.digest }}
-              ADMIN_PASSWORD: ${{ secrets.GABARIT_ADMIN_PASSWORD }}
             image:
               name: cr.yandex/sourcecraft/yc-cli:latest
               entrypoint: ""
             script:
               - |
                 set -e
+                [ -n "$YC_SA_KEY" ] || { echo "secret YC_SA_KEY is not set"; exit 1; }
+                [ -n "$ADMIN_PASSWORD" ] || { echo "secret GABARIT_ADMIN_PASSWORD is not set"; exit 1; }
+                printf '%s' "$YC_SA_KEY" > /tmp/sa-key.json
+                yc config set service-account-key /tmp/sa-key.json
                 yc config set folder-id "$YC_FOLDER_ID"
+                rm -f /tmp/sa-key.json
                 if [ -z "$DIGEST" ]; then   # fallback: digest of the image tagged latest
-                  DIGEST=$(yc container image list --repository-name "${REGISTRY#cr.yandex/}/$IMAGE_NAME" --format yaml \
-                    | awk '/digest:/{d=$2} /- latest/{print d; exit}')
+                  DIGEST=$(yc container image list --repository-name "${REGISTRY#cr.yandex/}/$IMAGE_NAME" --format yaml                     | awk '/digest:/{d=$2} /- latest/{print d; exit}')
                 fi
                 [ -n "$DIGEST" ] || { echo "image digest not found"; exit 1; }
-                [ -n "$ADMIN_PASSWORD" ] || { echo "secret GABARIT_ADMIN_PASSWORD is not set"; exit 1; }
-                sed -e "s#__IMAGE__#$REGISTRY/$IMAGE_NAME@$DIGEST#" \
-                    -e "s#__ADMIN_PASSWORD__#$ADMIN_PASSWORD#" deploy/docker-compose.yaml > /tmp/compose.yaml
+                sed -e "s#__IMAGE__#$REGISTRY/$IMAGE_NAME@$DIGEST#"                     -e "s#__ADMIN_PASSWORD__#$ADMIN_PASSWORD#" deploy/docker-compose.yaml > /tmp/compose.yaml
                 yc compute instance add-metadata --name "$VM_NAME" --metadata-from-file docker-compose=/tmp/compose.yaml
                 echo "deployed $REGISTRY/$IMAGE_NAME@$DIGEST to $VM_NAME"
                 yc compute instance get --name "$VM_NAME" --format yaml | awk '/one_to_one_nat:/{f=1} f && /address:/{print "demo: http://" $2; exit}'
