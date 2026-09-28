@@ -1,7 +1,6 @@
 # Cloud demo workflow: build the Docker image, push it to Container Registry and
-# roll it out to the demo VM (see deploy/README.md). Merge into
-# .sourcecraft/ci.yaml after deploy/yc-setup.sh and the service connection
-# "gabarit-demo" exist (a token of a missing connection breaks the whole CI).
+# roll it out to the demo VM (see deploy/README.md). Already merged into
+# .sourcecraft/ci.yaml; kept as a reference copy.
 on:
   push:
     - workflows: deploy-demo
@@ -20,7 +19,7 @@ workflows:
     tasks:
       - name: build-and-deploy
         env:
-          REGISTRY: cr.yandex/__REGISTRY_ID__
+          REGISTRY: cr.yandex/crpd9m3qa8n7gkrt5tt6
           IMAGE_NAME: gabarit
           VM_NAME: gabarit-demo
         cubes:

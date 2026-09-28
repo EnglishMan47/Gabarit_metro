@@ -69,7 +69,7 @@ SG=$(y vpc security-group get --name gabarit-sg --format yaml 2>/dev/null | fiel
 [ -n "$SG" ] || SG=$(y vpc security-group create --name gabarit-sg --network-name "$NET" \
   --rule "direction=ingress,port=80,protocol=tcp,v4-cidrs=[0.0.0.0/0]" \
   --rule "direction=ingress,port=22,protocol=tcp,v4-cidrs=[0.0.0.0/0]" \
-  --rule "direction=egress,protocol=any,v4-cidrs=[0.0.0.0/0]" --format yaml | field id)
+  --rule "direction=egress,from-port=0,to-port=65535,protocol=any,v4-cidrs=[0.0.0.0/0]" --format yaml | field id)
 ADDR=$(y vpc address get --name gabarit-ip --format yaml 2>/dev/null | field address || true)
 [ -n "$ADDR" ] || ADDR=$(y vpc address create --name gabarit-ip --external-ipv4 zone="$ZONE" --format yaml | field address)
 echo ">>> network $NET / $SUBNET, security group $SG, public IP $ADDR"
@@ -98,10 +98,9 @@ sed -i "s#cr.yandex/__REGISTRY_ID__#cr.yandex/$REG#" deploy/ci-cloud.yaml
 cat <<EOF
 
 Done. Next:
-  1. SourceCraft -> repository settings -> Service connections: create "gabarit-demo"
-     (folder $FOLDER, service account gabarit-ci).
-  2. SourceCraft -> repository settings -> Secrets: GABARIT_ADMIN_PASSWORD = the same password.
-  3. Add the deploy-demo workflow of deploy/ci-cloud.yaml to .sourcecraft/ci.yaml, commit, git push sourcecraft main
+  1. Key for the CI: yc iam key create --service-account-name gabarit-ci -o ~/.gabarit_ci_key.json
+  2. SourceCraft -> repository settings -> Secrets: YC_SA_KEY = that file, GABARIT_ADMIN_PASSWORD = the same password.
+  3. Registry $REG and folder $FOLDER into deploy-demo of .sourcecraft/ci.yaml, commit, git push sourcecraft main
   4. Copy a recording:  ./deploy/upload-bag.sh data/extracted/for_hackathon/doubleT_obstacle
 Demo: http://$ADDR   admin: http://$ADDR/admin (admin / your password)
 SSH:  ssh -i $KEY yc-user@$ADDR

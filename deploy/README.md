@@ -1,6 +1,6 @@
 # Облачное демо в Яндекс Облаке
 
-Веб-интерфейс работает на виртуальной машине Yandex Compute Cloud (Container Optimized Image). Workflow `deploy-demo` (`deploy/ci-cloud.yaml`, после настройки облака переносится в `.sourcecraft/ci.yaml`) собирает Docker-образ при каждом push в `main`, отправляет его в Container Registry, и ВМ перезапускает контейнер с новым образом.
+Веб-интерфейс работает на виртуальной машине Yandex Compute Cloud (Container Optimized Image). Workflow `deploy-demo` в `.sourcecraft/ci.yaml` собирает Docker-образ при каждом push в `main`, отправляет его в Container Registry, и ВМ перезапускает контейнер с новым образом.
 
 Проверка и запуск решения в CI без облака описаны в разделе «CI/CD в SourceCraft» [README](../README.md).
 
@@ -22,11 +22,15 @@ push в main ──► SourceCraft CI ──► Container Registry ──► В�
    GABARIT_ADMIN_PASSWORD=<пароль> bash deploy/yc-setup.sh
    ```
 
-   Скрипт создаёт реестр `gabarit`, сервисные аккаунты `gabarit-ci` (CI: push образов, обновление ВМ) и `gabarit-vm` (ВМ: загрузка образов), статический IP, группу безопасности (порты 80 и 22) и ВМ `gabarit-demo` (4 vCPU, 8 ГБ, SSD 100 ГБ), а также вписывает id реестра в `deploy/ci-cloud.yaml`. Повторный запуск безопасен.
-4. SourceCraft → настройки репозитория:
-   - **Сервисные подключения**: создать `gabarit-demo` — каталог из вывода скрипта, сервисный аккаунт `gabarit-ci`;
-   - **Секреты**: `GABARIT_ADMIN_PASSWORD` — тот же пароль.
-5. Перенести workflow `deploy-demo` и блок `tokens` из `deploy/ci-cloud.yaml` в `.sourcecraft/ci.yaml`, закоммитить и отправить: `git push sourcecraft main`. Ход сборки — в разделе CI/CD репозитория.
+   Скрипт создаёт реестр `gabarit`, сервисные аккаунты `gabarit-ci` (CI: push образов, обновление ВМ) и `gabarit-vm` (ВМ: загрузка образов), статический IP, группу безопасности (порты 80 и 22) и ВМ `gabarit-demo` (4 vCPU, 8 ГБ, SSD 100 ГБ), а также вписывает id реестра в `deploy/ci-cloud.yaml` (id реестра и каталога указаны в `deploy-demo` в `.sourcecraft/ci.yaml`). Повторный запуск безопасен.
+4. Ключ сервисного аккаунта `gabarit-ci` для CI (сервисное подключение SourceCraft видит только облака организации, к которой привязан репозиторий, поэтому CI входит по ключу):
+
+   ```bash
+   yc iam key create --service-account-name gabarit-ci -o ~/.gabarit_ci_key.json
+   ```
+
+   SourceCraft → настройки репозитория → **Секреты**: `YC_SA_KEY` — содержимое этого файла целиком, `GABARIT_ADMIN_PASSWORD` — пароль из шага 3.
+5. Отправить код: `git push sourcecraft main`. Workflow `deploy-demo` (в `.sourcecraft/ci.yaml`) собирает образ, отправляет его в реестр и обновляет ВМ. Ход — в разделе CI/CD репозитория.
 6. Записи проездов:
 
    ```bash
