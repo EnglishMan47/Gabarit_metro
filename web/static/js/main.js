@@ -160,7 +160,7 @@ function fillBags(bags) {
 }
 
 // ------------------------------------------------------------------ status
-const SHAPE_RU = { person: 'человек', child: 'ребёнок', box_50cm: 'ящик', box_30cm: 'предмет на рельсе', barrel: 'бочка', trolley: 'тележка', cable: 'кабель', glass: 'стекло' };
+const SHAPE_RU = { person: 'человек', child: 'ребёнок', box_50cm: 'ящик', box_30cm: 'предмет на рельсе', barrel: 'бочка', trolley: 'тележка', cable: 'кабель', glass: 'стеклянный объект' };
 
 function renderStatus(m) {
   const card = $('statusCard'), vp = $('viewport');
@@ -249,7 +249,7 @@ function renderStatus(m) {
 }
 
 function obKind(o) {
-  if (o.transparent) return 'прозрачный объект (стекло?)';
+  if (o.transparent) return 'стеклянный объект';
   if (o.low) return 'низкий объект на рельсе';
   const h = o.box.h[1];
   if (h > 1.2) return 'высокий объект (человек?)';

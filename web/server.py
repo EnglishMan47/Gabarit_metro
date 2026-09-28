@@ -331,6 +331,7 @@ class App:
 
         async def open_bag(bag_id: str, index: int = 0) -> None:
             stop_player()
+            await send_json({"type": "state", "playing": False})
             info = self.bags.get(bag_id)
             if info is None:
                 await send_json({"type": "error", "message": f"нет такой записи: {bag_id}"})
