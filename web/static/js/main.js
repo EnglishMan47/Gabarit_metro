@@ -568,6 +568,7 @@ function setBrakeMode(auto) {
   $('bmNote').classList.toggle('hidden', auto);
   state.autoBrake = auto;
   send({ cmd: 'autobrake', value: auto });
+  if (state.frame) renderStatus(state.frame);   // the card reflects the mode at once, also on pause
 }
 $('bmAuto').onclick = () => setBrakeMode(true);
 $('bmOff').onclick = () => {
