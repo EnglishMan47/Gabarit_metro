@@ -62,7 +62,13 @@ def main() -> int:
         head = f.read(16)
     if head[:4] == b"\x28\xb5\x2f\xfd":                      # zstd: .zst / .tar.zst
         raw = tmp.with_suffix(".raw")
-        subprocess.run(["zstd", "-d", "-f", "--rm", str(tmp), "-o", str(raw)], check=True)
+        if shutil.which("zstd"):
+            subprocess.run(["zstd", "-d", "-f", "--rm", str(tmp), "-o", str(raw)], check=True)
+        else:                                                 # no zstd binary: Python module
+            import zstandard
+            with open(tmp, "rb") as src, open(raw, "wb") as dst:
+                zstandard.ZstdDecompressor().copy_stream(src, dst, write_size=1 << 22)
+            tmp.unlink()
         tmp = raw
         with open(tmp, "rb") as f:
             head = f.read(16)
