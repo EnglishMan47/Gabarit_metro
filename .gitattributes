@@ -1,4 +1,7 @@
+# Keep Linux entry points runnable after a Windows checkout.
 *.sh text eol=lf
 docker/gabarit text eol=lf
 *.ps1 text eol=crlf
 *.cmd text eol=crlf
+Dockerfile text eol=lf
+.gitattributes text eol=lf

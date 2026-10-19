@@ -12,11 +12,13 @@ the envelope boundary, sparse noise (spray, reflections).
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from gabarit.config import Config
+from gabarit.filtering import support_mask
 from gabarit.track import TrackModel, _window_percentile
 
 AZ_RES = math.radians(0.083)   # horizontal step of one firing column
@@ -80,6 +82,9 @@ class Candidate:
     point_index: np.ndarray | None = None  # indices into the frame cloud
     low: bool = False        # low object on / between the rails (needs longer confirmation)
     transparent: bool = False  # most returns are split dual echoes: glass / film
+    single_beam: bool = False  # broad low body sampled by only one beam
+    rail_local: bool = False   # height measured from a local rail baseline, independent of fitted path.z
+    strict_rail_support: bool = True  # original high-threshold multi-beam rail evidence also exists
 
     @property
     def size(self) -> tuple[float, float, float]:
@@ -104,6 +109,8 @@ class Candidate:
             "rejected": self.rejected,
             "low": self.low,
             "transparent": self.transparent,
+            "single_beam": self.single_beam,
+            "height_reference": "local_rail" if self.rail_local else "path",
         }
 
 
@@ -122,7 +129,10 @@ class FrameGeometry:
 def track_coordinates(lev: np.ndarray, track: TrackModel, cfg: Config) -> FrameGeometry:
     f = lev[:, 1]
     in_range = (f >= track.s[0] - 0.5) & (f <= min(cfg.detection.max_range, track.s[-1]))
-    c, zr, _ = track.at(f)
+    # The lateral uncertainty returned by track.at is unused here. Avoid an
+    # extra full-cloud interpolation on every frame.
+    c = np.interp(f, track.s, track.c)
+    zr = np.interp(f, track.s, track.z)
     d = lev[:, 0] - c
     h = lev[:, 2] - zr
     env = cfg.envelope
@@ -177,9 +187,10 @@ def _fixture_row(s: np.ndarray, d: np.ndarray, h: np.ndarray, cand: "Candidate")
     return len(np.unique(np.floor(s[other] / 1.0))) >= 4
 
 
-def expected_points(width: float, height: float, rng: float, returns: int = 2) -> float:
-    cols = width / max(rng * AZ_RES, 1e-3)
-    rows = height / max(rng * EL_RES, 1e-3)
+def expected_points(width: float, height: float, rng: float, returns: int = 2,
+                    azimuth_res: float = AZ_RES, elevation_res: float = EL_RES) -> float:
+    cols = width / max(rng * azimuth_res, 1e-3)
+    rows = height / max(rng * elevation_res, 1e-3)
     return max(cols, 1.0) * max(rows, 1.0) * returns
 
 
@@ -189,9 +200,13 @@ _WEAK = ("sparse", "low_score", "far_weak", "floating", "pole_far")
 
 
 def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, track: TrackModel, cfg: Config,
-                     split: np.ndarray | None = None) -> list[Candidate]:
+                     split: np.ndarray | None = None, supported: np.ndarray | None = None) -> list[Candidate]:
     det = cfg.detection
     env = cfg.envelope
+    az_res = math.radians(cfg.sensor.azimuth_resolution_deg)
+    density_az = math.radians(cfg.sensor.density_azimuth_resolution_deg or cfg.sensor.azimuth_resolution_deg)
+    density_el = math.radians(cfg.sensor.density_elevation_resolution_deg or cfg.sensor.elevation_resolution_deg)
+    returns = 2 if cfg.sensor.dual_returns and cfg.sensor.scan_pattern == 'mechanical' else 1
     half = geo.half_width
     # context: corridor plus a band around it to recognise attached structures
     ctx = geo.in_range & (np.abs(geo.d) <= half + 1.2) & (geo.h >= env.min_height) & (geo.h <= env.height + 1.2)
@@ -201,6 +216,11 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
     s = geo.s[ctx_idx]
     d = geo.d[ctx_idx]
     h = geo.h[ctx_idx]
+    # Retain original connectivity: removing a sparse bridge must not turn a
+    # wall fragment into a detached obstacle. Isolated returns may not count
+    # as repeated fixtures, nor provide sufficient obstacle evidence below.
+    clean = supported[ctx_idx] if supported is not None else np.ones(len(ctx_idx), bool)
+    fixture_s, fixture_d, fixture_h = s[clean], d[clean], h[clean]
     v0, g = det.voxel_near, det.voxel_growth
     vox = v0 + g * np.maximum(s, 0.0)
     u = np.log(v0 + g * np.maximum(s, 0.0)) / g * 1.6 if g > 0 else s / v0
@@ -238,6 +258,14 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
         frac_out = float(out_lat.mean())
         top_all = float(h_all.max())
         rng = max(cand.s_near, 1.0)
+        # A resolved cable is one/few columns wide and many beams tall. The
+        # generic 0.3 m width floor dramatically overestimates its expected
+        # return count at close range and used to erase a previously seen cable.
+        slender = (n_in >= max(6, det.min_points) and rings >= 4
+                   and cand.s_near <= det.hanging_max_range
+                   and np.max(np.abs(d_all)) <= half
+                   and cand.size[0] <= .35 and cand.size[1] <= .12 and cand.size[2] >= .5
+                   and np.ptp(s[members]) <= .5 and np.ptp(d_all) <= .18)
         # low objects lying on or between the rails: the rail head is the top of
         # the track structure, so anything above it is foreign; the height
         # reference is reliable only where the rails themselves are resolved
@@ -278,7 +306,7 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
             cand.rejected = "ceiling_attached"
         if cand.rejected is None and _longitudinal(s, d, h, members, cand, half):
             cand.rejected = "longitudinal_structure"
-        if cand.rejected is None and abs(cand.lateral) > 0.5 and _fixture_row(s, d, h, cand):
+        if cand.rejected is None and abs(cand.lateral) > 0.5 and _fixture_row(fixture_s, fixture_d, fixture_h, cand):
             cand.rejected = "side_fixture_row"
         if cand.rejected is None and cand.s_near > 60.0 and _line_far(s, d, h, cand):
             cand.rejected = "line_far"
@@ -298,7 +326,7 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
             # far away only person-sized evidence is trusted: a thin pole or a
             # couple of returns can be signal equipment seen through path error
             az = np.arctan2(xyz[:, 0], xyz[:, 1])
-            n_cols = int(round(float(az.max() - az.min()) / AZ_RES)) + 1
+            n_cols = int(round(float(az.max() - az.min()) / az_res)) + 1
             need_rings = 3 if cand.s_near < 120.0 else 4
             if rings < need_rings or n_cols < 2 or cand.h_max - cand.h_min < 0.4:
                 cand.rejected = "far_weak"
@@ -306,7 +334,7 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
                 cand.rejected = "pole_far"
             elif cand.h_min > 2.2:
                 cand.rejected = "high_far"
-        if cand.rejected is None and not low_zone and cand.s_near > 40.0 and cand.h_min > 1.0                 and cand.h_max < env.height - 0.3 and cand.size[1] < 0.8:
+        if cand.rejected is None and not low_zone and not slender and cand.s_near > 40.0 and cand.h_min > 1.0                 and cand.h_max < env.height - 0.3 and cand.size[1] < 0.8:
             # hangs in the middle of the envelope without touching the track or
             # the vault: equipment on a wall arm seen through a path error
             # (a person or a fallen object always reaches down to the track)
@@ -316,11 +344,15 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
         if cand.rejected is None and cand.s_near > 50.0:
             # far away the path is known to ~0.1-0.3 m: an object that only
             # touches the boundary cannot be told from wall equipment
-            core = half - (0.15 + 0.003 * (cand.s_near - 50.0))
+            # Keep a central observable corridor when using long-range lidar;
+            # an unbounded margin otherwise rejects even centre-line returns.
+            core = max(min(0.35, half), half - (0.15 + 0.003 * (cand.s_near - 50.0)))
             if float(np.abs(di).min()) > core:
                 cand.rejected = "edge_far"
         # --- score of the remaining evidence
-        exp = expected_points(max(cand.size[1], 0.3), max(cand.size[2], 0.3), rng)
+        score_width = max(cand.size[1], rng*az_res) if slender else max(cand.size[1], .3)
+        exp = expected_points(score_width, max(cand.size[2], 0.3), rng,
+                              returns=returns,azimuth_res=density_az,elevation_res=density_el)
         density = min(1.0, n_in / max(0.25 * exp, 3.0))
         vert = min(1.0, (cand.h_max - cand.h_min) / 0.3)
         if low_zone:
@@ -329,9 +361,12 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
         edge = 1.0 if np.abs(di).min() < half - env.edge_zone else 0.55
         sig_c = float(np.interp(cand.s_near, track.s, track.sig_c))
         path_conf = 1.0 if sig_c < 0.15 else max(0.3, 1.0 - (sig_c - 0.15) * 2.0)
-        observed = 1.0 if cand.s_near <= track.observed_until + 10.0 else 0.6
+        fresh_until = track.current_observed_until if track.current_observed_until is not None else track.observed_until
+        observed = 1.0 if cand.s_near <= fresh_until + 10.0 else 0.6
         cand.score = float(density * (0.5 + 0.5 * vert) * edge * path_conf * observed)
         reasons = [f"{n_in} точек на {rings} лучах"]
+        if slender:
+            reasons.append("разрешённое тонкое вертикальное тело")
         if edge < 1.0:
             reasons.append("у границы габарита")
         if path_conf < 1.0:
@@ -355,17 +390,45 @@ def _detect_envelope(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, trac
                 if cand.rejected in _WEAK:
                     cand.rejected = None
                     cand.score = max(cand.score, det.min_score + 0.1)
+        if cand.rejected in (None, 'low_score') and supported is not None:
+            evidence = idx_in[supported[idx_in]]
+            min_points = det.low_min_points if low_zone else det.min_points
+            evidence_rings = len(np.unique(ring[evidence])) if ring is not None and ring.size else len(evidence)
+            if len(evidence) < min_points or evidence_rings < det.min_rings:
+                cand.rejected = "isolated_returns"
         cands.append(cand)
     cands.sort(key=lambda c: (c.rejected is not None, c.s_near))
     return cands[: det.max_clusters * 2]
 
 
 def detect(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, track: TrackModel, cfg: Config,
-           split: np.ndarray | None = None) -> list[Candidate]:
+           split: np.ndarray | None = None, *, filter_stats: dict | None = None) -> list[Candidate]:
     """All candidates of one frame: envelope clusters + objects lying on the rails."""
-    cands = _detect_envelope(lev, ring, geo, track, cfg, split)
-    rail = detect_rail_objects(lev, ring, geo, track, cfg)
-    for rc in rail:
+    supported = None
+    examined = removed = 0
+    filter_ms = 0.0
+    if cfg.filter.enabled:
+        t0 = time.perf_counter()
+        # Filter obstacle evidence after estimating the path. Sparse far wall
+        # returns remain available to the track estimator and ego-motion. A
+        # small halo supplies support for objects crossing the envelope edge.
+        region = (geo.in_range & (np.abs(geo.d) <= geo.half_width + 0.2)
+                  & (geo.h >= min(cfg.envelope.min_height, 0.08))
+                  & (geo.h <= cfg.envelope.height + 0.2))
+        idx = np.flatnonzero(region)
+        examined = len(idx)
+        if examined:
+            supported = np.ones(len(lev), bool)
+            mask = support_mask(lev[idx], cfg.filter)
+            supported[idx] = mask
+            removed = int((~mask).sum())
+        filter_ms = (time.perf_counter() - t0) * 1000.0
+    if filter_stats is not None:
+        filter_stats.update(removed=removed, examined=examined, ms=filter_ms)
+    cands = _detect_envelope(lev, ring, geo, track, cfg, split, supported)
+    rail = detect_rail_objects(lev, ring, geo, track, cfg, supported)
+    hanging = detect_hanging_objects(lev, ring, geo, cfg, cands)
+    for rc in rail + hanging:
         clash = any(c.rejected is None and abs(c.s_near - rc.s_near) < 1.5 and abs(c.lateral - rc.lateral) < 0.6
                     for c in cands)
         if not clash:
@@ -375,8 +438,58 @@ def detect(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, track: TrackMo
     return cands
 
 
+def detect_hanging_objects(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry,
+                           cfg: Config, cands: list[Candidate]) -> list[Candidate]:
+    """Recover a thin vertical body whose lower tip crosses the envelope.
+
+    A cable can contribute only two returns inside the envelope; its continuation
+    above the boundary supplies independent multi-beam evidence. Search narrowly
+    above an existing tip, so a ceiling surface or a broad fixture cannot become
+    a cable just because it is near the clearance boundary.
+    """
+    det, env = cfg.detection, cfg.envelope
+    anchors = [c for c in cands if c.rejected in {'sparse', 'low_score', 'ceiling_fixture'}
+               and env.height-1.2 <= c.h_min <= env.height-.1
+               and c.s_near <= det.hanging_max_range and abs(c.lateral) <= geo.half_width-.1
+               and c.size[0] <= .15 and c.size[1] <= .12]
+    if not anchors or det.hanging_max_range <= 0:
+        return []
+    ctx = (geo.in_range & (geo.s <= det.hanging_max_range)
+           & (np.abs(geo.d) <= geo.half_width)
+           & (geo.h >= env.height-1.2) & (geo.h <= env.height+1.2))
+    idx = np.flatnonzero(ctx)
+    out = []
+    for c in anchors:
+        ids = idx[(np.abs(geo.s[idx]-.5*(c.s_near+c.s_far)) < .15)
+                  & (np.abs(geo.d[idx]-c.lateral) < .08)]
+        if len(ids) < max(6, det.min_points):
+            continue
+        if cfg.filter.enabled and len(ids):
+            ids = ids[support_mask(lev[ids], cfg.filter)]
+        inside = ids[geo.corridor[ids]]
+        if len(ids) < max(4, det.min_points) or len(inside) < 2:
+            continue
+        ss, dd, hh = geo.s[ids], geo.d[ids], geo.h[ids]
+        rings = len(np.unique(ring[ids]))
+        inside_rings = len(np.unique(ring[inside]))
+        if (rings < 4 or inside_rings < 2 or hh.max() < env.height+.2
+                or np.ptp(hh) < .5 or np.ptp(ss) > .5 or np.ptp(dd) > .15
+                or len(np.unique(np.floor(hh/.1))) < 4 or np.diff(np.sort(hh)).max() > .4):
+            continue
+        si, di, hi = geo.s[inside], geo.d[inside], geo.h[inside]
+        out.append(Candidate(
+            id=0, s_near=float(si.min()), s_far=float(si.max()),
+            d_min=float(di.min()), d_max=float(di.max()), h_min=float(hi.min()), h_max=float(hi.max()),
+            distance=float(np.linalg.norm(lev[inside], axis=1).min()),
+            n_points=len(inside), n_rings=inside_rings, lateral=float(np.median(di)),
+            score=min(1.0, len(ids)/10.0), point_index=inside,
+            reasons=[f"тонкое вертикальное тело: {len(ids)} точек на {rings} лучах снаружи и внутри габарита"],
+        ))
+    return out
+
+
 def detect_rail_objects(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, track: TrackModel,
-                        cfg: Config) -> list[Candidate]:
+                        cfg: Config, supported: np.ndarray | None = None, *, strict_only: bool = False) -> list[Candidate]:
     """Small objects lying on a running rail (e.g. 300x300x100 mm).
 
     The rail head is the highest part of the track structure and is sampled by
@@ -403,38 +516,68 @@ def detect_rail_objects(lev: np.ndarray, ring: np.ndarray, geo: FrameGeometry, t
         np.maximum.at(top, b, geo.h[idx])
         top[~np.isfinite(top)] = np.nan
         base = _window_percentile(top, 10, 0.4)
-        thr = base + 0.07 + 0.0008 * np.arange(nb) * step
-        above = geo.h[idx] > thr[b]
-        cnt = np.bincount(b[above], minlength=nb)
-        hot = (cnt >= det.low_min_points) & np.isfinite(base)
-        k = 0
-        while k < nb:
-            if not hot[k]:
-                k += 1
+        # Select the body below its top as well: selecting only the highest
+        # grazing beam used to erase 10 cm objects before the two-beam gate.
+        bin_s = np.arange(nb) * step
+        near_margin = 0.5 * det.low_min_protrusion + 0.0004 * bin_s
+        far_margin = 0.07 + 0.0008 * bin_s
+        near_weight = np.clip((det.low_dense_range + 5.0 - bin_s) / 5.0, 0.0, 1.0)
+        if strict_only:
+            near_weight[:] = 0.
+        thr = base + near_weight * near_margin + (1.0-near_weight) * far_margin
+        for single in (False, True):
+            if single and (strict_only or det.low_single_beam_range <= 0):
                 continue
-            j = k
-            while j + 1 < nb and hot[j + 1]:
-                j += 1
-            run = j - k + 1
-            sel = idx[above & (b >= k) & (b <= j)]
-            k = j + 1
-            if run > 3 or len(sel) < det.low_min_points:
-                continue  # long raised structure: switch blade, check rail, joint bar
-            ss, dd, hh = geo.s[sel], geo.d[sel], geo.h[sel]
-            base_here = float(np.nanmedian(base[max(0, int(ss.min() / step)):int(ss.max() / step) + 1]))
-            xyz = lev[sel]
-            c = Candidate(
-                id=0, s_near=float(ss.min()), s_far=float(ss.max()), d_min=float(dd.min()), d_max=float(dd.max()),
-                h_min=float(hh.min() - base_here), h_max=float(hh.max() - base_here),
-                distance=float(np.sqrt((xyz ** 2).sum(axis=1)).min()), n_points=len(sel),
-                n_rings=int(len(np.unique(ring[sel]))) if ring is not None and ring.size else len(sel),
-                lateral=float(np.median(dd)), score=min(1.0, len(sel) / 6.0),
-                reasons=[f"выступ {hh.max() - base_here:.2f} м над головкой рельса", f"{len(sel)} точек"],
-                point_index=sel, low=True,
-            )
-            # a single grazing ring over the rail head gives ~0.1 m bumps: require
-            # a clear protrusion seen by two beams
-            if c.h_max > 0.6 or c.n_rings < 2 or c.h_max < 0.13:
-                continue
-            out.append(c)
+            threshold = (base + near_margin)[b] if single else thr[b]
+            above = geo.h[idx] > threshold
+            if single:
+                above &= geo.s[idx] <= det.low_single_beam_range
+            cnt = np.bincount(b[above], minlength=nb)
+            hot = (cnt >= det.low_min_points) & np.isfinite(base)
+            k = 0
+            while k < nb:
+                if not hot[k]:
+                    k += 1
+                    continue
+                j = k
+                while j + 1 < nb and hot[j + 1]:
+                    j += 1
+                run = j - k + 1
+                sel = idx[above & (b >= k) & (b <= j)]
+                k = j + 1
+                if run > 3 or len(sel) < det.low_min_points:
+                    continue  # long raised structure: switch blade, check rail, joint bar
+                ss, dd, hh = geo.s[sel], geo.d[sel], geo.h[sel]
+                base_here = float(np.nanmedian(base[max(0, int(ss.min() / step)):int(ss.max() / step) + 1]))
+                xyz = lev[sel]
+                c = Candidate(
+                    id=0, s_near=float(ss.min()), s_far=float(ss.max()), d_min=float(dd.min()), d_max=float(dd.max()),
+                    h_min=float(hh.min() - base_here), h_max=float(hh.max() - base_here),
+                    distance=float(np.sqrt((xyz ** 2).sum(axis=1)).min()), n_points=len(sel),
+                    n_rings=int(len(np.unique(ring[sel]))) if ring is not None and ring.size else len(sel),
+                    lateral=float(np.median(dd)), score=min(1.0, len(sel) / 6.0),
+                    reasons=[f"выступ {hh.max() - base_here:.2f} м над головкой рельса", f"{len(sel)} точек"],
+                    point_index=sel, low=True, rail_local=True,
+                )
+                # A 0.10 m obstacle must survive the height gate. One-beam
+                # returns use the separate, slower temporal confirmation rule.
+                if c.h_max > 0.6 or c.h_max < det.low_min_protrusion:
+                    continue
+                if single:
+                    if (c.n_rings != 1 or c.n_points < max(4, det.low_min_points)
+                            or c.d_max-c.d_min < det.low_min_width):
+                        continue
+                    c.single_beam = True
+                    c.reasons.append("широкий однолучевой возврат: требуется длительное подтверждение")
+                elif c.n_rings < 2:
+                    continue
+                if c.h_max < 0.13 and c.d_max - c.d_min < det.low_min_width:
+                    continue
+                if supported is not None and np.count_nonzero(supported[sel]) < det.low_min_points:
+                    continue
+                out.append(c)
+    if not strict_only and out:
+        strict = detect_rail_objects(lev,ring,geo,track,cfg,supported,strict_only=True)
+        for c in out:
+            c.strict_rail_support = any(np.intersect1d(c.point_index,old.point_index).size >= 2 for old in strict)
     return out

@@ -1,0 +1,10 @@
+# Linux/X11 only: docker compose -f compose.yaml -f docker/compose.x11.yaml up -d
+services:
+  gabarit:
+    environment:
+      GABARIT_GUI: x11
+      DISPLAY: ${DISPLAY}
+      XAUTHORITY: /tmp/gabarit.xauth
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - ${GABARIT_XAUTHORITY:-/tmp/gabarit.xauth}:/tmp/gabarit.xauth:ro

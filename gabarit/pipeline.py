@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 
 from gabarit import limit_blas_threads
-from gabarit.cloud import Cloud, from_raw, working_set
+from gabarit.cloud import Cloud, from_raw
 from gabarit.config import Config
 from gabarit.detect import FrameGeometry, detect, track_coordinates
 from gabarit.egomotion import EgoMotion, propagate_track
@@ -48,6 +48,7 @@ class Pipeline:
         self.prior: TrackModel | None = None
         self.frame_index = 0
         self.last_stamp: float | None = None
+        self.source_frame_id: str | None = None
         self.turnout_hist: list = []
 
     def reset(self) -> None:
@@ -57,6 +58,7 @@ class Pipeline:
         self.prior = None
         self.frame_index = 0
         self.last_stamp = None
+        self.source_frame_id = None
         self.turnout_hist = []
 
     def _blend_path(self, track: TrackModel, prior: TrackModel) -> None:
@@ -73,21 +75,45 @@ class Pipeline:
         track.theta = np.gradient(track.c, track.s)
         self.track.prev = track
 
-    def process_raw(self, raw: RawCloud, stamp: float | None = None, **kw) -> FrameResult:
+    def process_raw(self, raw: RawCloud, stamp: float | None = None, *,
+                    preserve_source_index: bool = False, **kw) -> FrameResult:
         t0 = time.perf_counter()
-        cloud = from_raw(raw, self.cfg.sensor.forward_axis, self.cfg.sensor.min_range)
-        cloud = cloud.subset(working_set(cloud, self.cfg.detection.max_range + 5.0))
+        source_reset = self.source_frame_id is not None and raw.frame_id != self.source_frame_id
+        if source_reset:
+            self.reset()
+        self.source_frame_id = raw.frame_id
+        sensor = self.cfg.sensor
+        cloud = from_raw(raw, sensor.forward_axis, sensor.min_range, up_axis=sensor.up_axis,
+                         scan_pattern=sensor.scan_pattern, dual_returns=sensor.dual_returns,
+                         elevation_resolution_deg=sensor.elevation_resolution_deg,
+                         working_range=self.cfg.detection.max_range + 5.0,
+                         preserve_source_index=preserve_source_index)
         decode_ms = (time.perf_counter() - t0) * 1000
         res = self.process_cloud(cloud, stamp if stamp is not None else raw.stamp, **kw)
+        if source_reset:
+            res.data["state_reset"] = "frame_id_change"
         res.data["timing_ms"]["decode"] = round(decode_ms, 2)
-        res.data["timing_ms"]["total"] = round(res.data["timing_ms"]["total"] + decode_ms, 2)
+        res.data["timing_ms"]["total"] = round((time.perf_counter() - t0) * 1000, 2)
+        res.data["realtime"]["deadline_met"] = res.data["timing_ms"]["total"] <= 100.0
         return res
 
     def process_cloud(self, cloud: Cloud, stamp: float, frame_index: int | None = None) -> FrameResult:
         cfg = self.cfg
         t0 = time.perf_counter()
+        if not math.isfinite(stamp):
+            raise ValueError("frame timestamp must be finite")
+        # Replaying another bag, looping or seeking must not inherit obstacle
+        # tracks and calibration from an unrelated point in recording time.
+        reset_reason = None
+        if self.last_stamp is not None and (stamp <= self.last_stamp or stamp - self.last_stamp >= 1.0):
+            reset_reason = ("time_rewind" if stamp < self.last_stamp else
+                            "duplicate_stamp" if stamp == self.last_stamp else "time_gap")
+            source_frame_id = self.source_frame_id
+            self.reset()
+            self.source_frame_id = source_frame_id
         # prior path: previous frame moved by the predicted displacement
         prior = None
+        previous_path = self.track.prev
         if self.track.prev is not None and self.last_stamp is not None:
             dt = stamp - self.last_stamp
             dt = dt if 0.02 < dt < 1.0 else 0.1
@@ -99,9 +125,18 @@ class Pipeline:
         delta, speed = self.ego.update(lev, stamp)
         t2 = time.perf_counter()
         geo = track_coordinates(lev, track, cfg)
-        cands = detect(lev, cloud.ring, geo, track, cfg, cloud.split)
+        filter_stats: dict = {}
+        cands = detect(lev, cloud.ring, geo, track, cfg, cloud.split, filter_stats=filter_stats)
+        allow_single = self.ego.quality >= 0.8 and abs(delta) <= 0.01
+        if not allow_single:
+            for candidate in cands:
+                if candidate.single_beam and candidate.rejected is None:
+                    candidate.rejected = "single_beam_unverified_standstill"
         t3 = time.perf_counter()
-        tracks = self.tracker.update(cands, delta)
+        tracking_prior = propagate_track(previous_path,delta) if previous_path is not None else None
+        tracks = self.tracker.update(cands, delta, allow_single=allow_single,
+                                     path_prior=tracking_prior,path_current=track,
+                                     lev=lev,ring=cloud.ring,geo=geo)
         t4 = time.perf_counter()
         self.last_stamp = stamp
         # turnout ahead: reported when seen in 3 of the last 5 frames
@@ -121,8 +156,10 @@ class Pipeline:
         obstacle = bool(confirmed)
         nearest = confirmed[0].cand.distance if confirmed else None
         nearest_s = confirmed[0].cand.s_near if confirmed else None
-        observed = float(min(track.observed_until, cfg.detection.max_range))
-        free = nearest_s if obstacle else observed
+        envelope_until = float(min(track.observed_until, cfg.detection.max_range))
+        fresh_until = track.current_observed_until if track.current_observed_until is not None else track.observed_until
+        observed = float(min(fresh_until, cfg.detection.max_range))
+        free = min(nearest_s, observed) if obstacle else observed
         if obstacle:
             status = "OBSTACLE"
         elif pending:
@@ -132,7 +169,6 @@ class Pipeline:
         else:
             status = "CLEAR"
         v = max(speed, 0.0)
-        stop = v * cfg.reaction_time + v * v / (2 * cfg.braking_deceleration)
         ttc = (nearest_s / v) if (obstacle and v > 0.5) else None
 
         labels = np.zeros(len(cloud), np.uint8)
@@ -156,11 +192,18 @@ class Pipeline:
             "nearest_track_distance_m": None if nearest_s is None else round(float(nearest_s), 2),
             "free_distance_m": round(float(free), 1),
             "observed_until_m": round(observed, 1),
+            "current_observed_until_m": round(observed, 1),
+            "envelope_until_m": round(envelope_until, 1),
+            "envelope_held": track.coast_frames > 0,
+            "envelope_coasted_frames": track.coast_frames,
+            "analysis_range_m": min(cfg.detection.max_range, cfg.track.horizon),
+            "state_reset": reset_reason,
+            "sensor": {"forward_axis": cfg.sensor.forward_axis, "up_axis": cfg.sensor.up_axis,
+                       "scan_pattern": cfg.sensor.scan_pattern, "frame_id": cloud.frame_id},
             "speed_mps": round(float(speed), 2),
             "speed_kmh": round(float(speed) * 3.6, 1),
             "displacement_m": round(float(delta), 3),
             "ego_quality": round(self.ego.quality, 3),
-            "stopping_distance_m": round(float(stop), 1),
             "time_to_obstacle_s": None if ttc is None else round(float(ttc), 1),
             "obstacles": [t.public() for t in confirmed],
             "pending": [t.public() for t in pending],
@@ -169,15 +212,24 @@ class Pipeline:
             "calibration": track.calibration,
             "envelope": {"width_m": cfg.envelope.width, "height_m": cfg.envelope.height,
                          "min_height_m": cfg.envelope.min_height},
-            "points": {"raw": cloud.raw_count, "valid": len(cloud), "envelope": int(geo.corridor.sum())},
+            "points": {"raw": cloud.raw_count, "valid": len(cloud), "envelope": int(geo.corridor.sum()),
+                       "filtered": int(filter_stats.get("removed", 0)),
+                       "filter_examined": int(filter_stats.get("examined", 0))},
+            "path_guard": {"active": self.track.noisy_rail_frames >= 2,
+                           "isolated_near_returns": self.track.rail_noise_points},
             "timing_ms": {
+                "decode": 0.0,
+                "filter": round(float(filter_stats.get("ms", 0.0)), 2),
                 "track": round((t1 - t0) * 1000, 2),
                 "egomotion": round((t2 - t1) * 1000, 2),
-                "detect": round((t3 - t2) * 1000, 2),
+                "detect": round(max(0.0, (t3 - t2) * 1000 - filter_stats.get("ms", 0.0)), 2),
                 "tracking": round((t4 - t3) * 1000, 2),
                 "total": round((t4 - t0) * 1000, 2),
             },
+            "realtime": {"target_hz": 10.0, "budget_ms": 100.0, "deadline_met": False},
         }
+        data["timing_ms"]["total"] = round((time.perf_counter() - t0) * 1000, 2)
+        data["realtime"]["deadline_met"] = data["timing_ms"]["total"] <= 100.0
         return FrameResult(data, cloud, lev, geo, track, labels)
 
 
@@ -186,10 +238,6 @@ def _blend(new: np.ndarray, old: np.ndarray, w_new: np.ndarray) -> np.ndarray:
     out = new.copy()
     out[ok] = w_new[ok] * new[ok] + (1 - w_new[ok]) * old[ok]
     return out
-
-
-def stopping_distance(speed: float, cfg: Config) -> float:
-    return speed * cfg.reaction_time + speed * speed / (2 * cfg.braking_deceleration)
 
 
 def kmh(v: float) -> float:

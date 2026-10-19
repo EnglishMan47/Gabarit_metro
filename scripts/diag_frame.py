@@ -26,6 +26,7 @@ def main() -> int:
     ap.add_argument("frames", type=int, nargs="+")
     ap.add_argument("--warmup", type=int, default=8)
     ap.add_argument("--fmax", type=float, default=200)
+    ap.add_argument("--config", type=Path, default=None, help="sensor profile, including Falcon axes")
     ap.add_argument("-o", "--out", type=Path, default=Path("diag.png"))
     args = ap.parse_args()
     import matplotlib
@@ -35,7 +36,7 @@ def main() -> int:
     reader = BagReader(open_bag(args.bag))
     fig, axes = plt.subplots(2 * len(args.frames), 1, figsize=(26, 9 * len(args.frames)))
     for k, target in enumerate(args.frames):
-        pipe = Pipeline(Config())
+        pipe = Pipeline(Config.load(args.config))
         res = None
         for i in range(max(0, target - args.warmup), target + 1):
             ts, raw = reader.read(i)
@@ -84,7 +85,9 @@ def main() -> int:
         ax2.grid(True)
         ax2.set_title("side view in track frame (|d| < W/2 + 0.5)")
     plt.tight_layout()
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(args.out, dpi=55)
+    reader.close()
     print("saved", args.out)
     return 0
 

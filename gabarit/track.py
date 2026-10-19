@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 
 from gabarit.config import Config
+from gabarit.filtering import support_mask
 
 LAT_BIN = 0.04
 LAT_MIN, LAT_MAX = -8.0, 8.0
@@ -157,12 +159,21 @@ def _med(a) -> float:
     return _pct(a, 50.0)
 
 
+@lru_cache(maxsize=128)
+def _window_indices(n: int, half: int) -> np.ndarray:
+    # Repeated rail windows have the same short lengths. Reusing these indices
+    # avoids thousands of np.pad / sliding_window_view dispatches per second.
+    return np.arange(n)[:, None] + np.arange(2 * half + 1)[None, :]
+
+
 def _window_percentile(a: np.ndarray, half: int, q: float) -> np.ndarray:
     """Percentile in a sliding window ignoring NaN (fast, sort based)."""
-    pad = np.pad(a, half, constant_values=np.nan)
-    win = np.lib.stride_tricks.sliding_window_view(pad, 2 * half + 1)
-    cnt = np.isfinite(win).sum(axis=1)
-    srt = np.sort(np.where(np.isfinite(win), win, np.inf), axis=1)
+    pad = np.full(len(a) + 2 * half, np.nan)
+    pad[half:half + len(a)] = a
+    win = pad[_window_indices(len(a), half)]
+    finite = np.isfinite(win)
+    cnt = finite.sum(axis=1)
+    srt = np.sort(np.where(finite, win, np.inf), axis=1)
     idx = np.floor(np.maximum(cnt - 1, 0) * q).astype(int)
     out = srt[np.arange(len(a)), idx]
     out[cnt == 0] = np.nan
@@ -170,12 +181,21 @@ def _window_percentile(a: np.ndarray, half: int, q: float) -> np.ndarray:
 
 
 def _window_max(a: np.ndarray, half: int) -> np.ndarray:
-    pad = np.pad(a, half, constant_values=-np.inf)
-    win = np.lib.stride_tricks.sliding_window_view(np.where(np.isfinite(pad), pad, -np.inf), 2 * half + 1)
+    pad = np.full(len(a) + 2 * half, -np.inf)
+    pad[half:half + len(a)] = np.where(np.isfinite(a), a, -np.inf)
+    win = pad[_window_indices(len(a), half)]
     return win.max(axis=1)
 
 
-def _rail_pair(xs, prof, center, gauge, tol, search, min_prom):
+def _short_line(x: list, y: list) -> tuple[float, float]:
+    """Least-squares line for a few rail centres, without a LAPACK call."""
+    xm, ym = sum(x) / len(x), sum(y) / len(y)
+    xx = sum((v - xm) ** 2 for v in x)
+    slope = sum((a - xm) * (b - ym) for a, b in zip(x, y)) / xx if xx > 0.0 else 0.0
+    return slope, ym - slope * xm
+
+
+def _rail_pair(xs, prof, center, gauge, tol, search, min_prom, center_bounds=None):
     """Find the best pair of rail peaks in one lateral max-height profile."""
     finite = np.isfinite(prof)
     if finite.sum() < 6:
@@ -203,6 +223,8 @@ def _rail_pair(xs, prof, center, gauge, tol, search, min_prom):
             if abs(g - gauge) > tol:
                 continue
             c = 0.5 * (px[i] + px[j])
+            if center_bounds is not None and not center_bounds[0] <= c <= center_bounds[1]:
+                continue
             if abs(c - center) > search or abs(pz[i] - pz[j]) > 0.12:
                 continue
             score = pp[i] + pp[j] - 2 * abs(g - gauge) - abs(c - center)
@@ -373,6 +395,10 @@ class TrackModel:
     observed_until: float     # path verified by measurements up to this distance
     rail_until: float
     calibration: dict = field(default_factory=dict)
+    # A short, explicitly marked continuation through missing wall / rail
+    # returns. Measurement flags still refer to this frame only.
+    coast_frames: int = 0
+    current_observed_until: float | None = None
 
     def at(self, f: np.ndarray):
         """Interpolated centre, rail height and uncertainty at distances ``f``."""
@@ -411,6 +437,9 @@ class TrackModel:
             "sig_c": np.round(self.sig_c[sl], 3).tolist(),
             "observed_until": round(self.observed_until, 1),
             "rail_until": round(self.rail_until, 1),
+            "coasted_frames": self.coast_frames,
+            "current_observed_until": round(self.current_observed_until if self.current_observed_until is not None
+                                            else self.observed_until, 1),
             "rails": np.round(self.rails, 3).tolist(),
         }
 
@@ -426,17 +455,24 @@ class TrackEstimator:
         self.prev: TrackModel | None = None
         self.turnout_at: float | None = None
         self.offsets = {"L": None, "R": None, "F": None, "C": None}
+        self.noisy_rail_frames = 0
+        self.rail_noise_points = 0
 
     def reset(self) -> None:
         self.calib = Calibration.from_config(self.cfg)
         self.prev = None
+        self.turnout_at = None
         self.offsets = {"L": None, "R": None, "F": None, "C": None}
+        self.noisy_rail_frames = 0
+        self.rail_noise_points = 0
 
     # -- calibration -------------------------------------------------------
 
-    def _rails_near(self, lev: np.ndarray, c_guess: np.ndarray, until: float) -> np.ndarray:
+    def _rails_near(self, lev: np.ndarray, c_guess: np.ndarray, until: float,
+                    prior: TrackModel | None = None) -> np.ndarray:
         """Detect rail pairs slice by slice in the levelled cloud (vectorised profiles)."""
         t = self.cfg.track
+        self.turnout_at = None
         edges = self.edges[self.edges[:, 1] <= until]
         if not len(edges):
             return np.zeros((0, 5))
@@ -476,12 +512,19 @@ class TrackEstimator:
             else:
                 k = min(len(found_s), 6)
                 if k >= 3 and found_s[-1] - found_s[-k] > 3.0:
-                    a, b = np.polyfit(found_s[-k:], found_c[-k:], 1)
+                    a, b = _short_line(found_s[-k:], found_c[-k:])
                     pred = a * sm + b
                 else:
                     pred = found_c[-1]
                 search = 0.3 if sm - found_s[-1] < 8.0 else 0.45
-            r = _rail_pair(xs, prof[i], pred, t.gauge, t.gauge_tolerance, search, t.rail_min_prominence)
+            bounds = None
+            if self.noisy_rail_frames >= 2 and prior is not None and sm <= prior.rail_until+2.:
+                sigma = float(np.interp(sm,prior.s,prior.sig_c))
+                if sigma < .15:
+                    margin = max(.25,3.*sigma)
+                    bounds = (c_guess[i]-margin,c_guess[i]+margin)
+            r = _rail_pair(xs, prof[i], pred, t.gauge, t.gauge_tolerance, search,
+                           t.rail_min_prominence,bounds)
             if r is not None:
                 out.append((sm, r[1], r[2], r[3], r[4]))
                 found_s.append(sm)
@@ -606,7 +649,23 @@ class TrackEstimator:
             # first frame: calibrate before estimating anything else
             self._calibrate(self._rails_near(self.calib.level(xyz), guess, 32.0))
         lev = self.calib.level(xyz)
-        rails = self._rails_near(lev, guess, t.rail_search_max)
+        # Scattered unsupported returns in the previously clear near corridor
+        # indicate disturbed measurements. Require persistence: a single sparse
+        # fixture must not change rail selection. Keep real rail returns and
+        # constrain their branch only against a sufficiently certain prior.
+        self.rail_noise_points = 0
+        if prior is not None and cfg.filter.enabled:
+            f = lev[:,1]
+            d = lev[:,0]-np.interp(f,prior.s,prior.c)
+            h = lev[:,2]-np.interp(f,prior.s,prior.z)
+            region = ((f >= t.start) & (f < min(60.,prior.observed_until))
+                      & (np.abs(d) < cfg.envelope.width/2+.2) & (h > .6) & (h < 2.5))
+            self.rail_noise_points = int(np.count_nonzero(~support_mask(lev[region],cfg.filter)))
+        if self.rail_noise_points >= 16:
+            self.noisy_rail_frames = min(5,self.noisy_rail_frames+1)
+        else:
+            self.noisy_rail_frames = max(0,self.noisy_rail_frames-1)
+        rails = self._rails_near(lev, guess, t.rail_search_max,prior)
         rail_by_slice = {}
         for r in rails:
             rail_by_slice[int(np.searchsorted(edges[:, 1], r[0], side="right"))] = r
@@ -839,11 +898,33 @@ class TrackEstimator:
             return self.estimate(xyz, None)
         observed = centres[obs_c]
         last_lat = float(observed.max()) if len(observed) else float(edges[0, 0])
+        current_observed_until = last_lat
+        coast_frames = 0
+        # A sparse frame must not collapse an already measured corridor to the
+        # first slice. Retain the motion-compensated previous tail for a bounded
+        # number of frames, increasing uncertainty and retaining fresh flags.
+        # An unobserved startup path is never promoted into a measured path.
+        if (prior is not None and prior.observed_until > last_lat + 2.0
+                and prior.coast_frames < t.hold_missing_frames):
+            old_c = np.interp(centres, prior.s, prior.c, right=np.nan)
+            old_z = np.interp(centres, prior.s, prior.z, right=np.nan)
+            retained = (centres > last_lat) & (centres <= prior.observed_until) & np.isfinite(old_c)
+            if retained.any():
+                weight = np.clip((centres - last_lat) / 8.0, 0.0, 1.0) if len(observed) else np.ones(n)
+                c_fit[retained] += weight[retained] * (old_c[retained] - c_fit[retained])
+                if not rec_ver:
+                    ok_z = retained & np.isfinite(old_z)
+                    z_fit[ok_z] = old_z[ok_z]
+                sc_fit[retained] = np.maximum(sc_fit[retained], np.interp(centres, prior.s, prior.sig_c)[retained] + 0.03)
+                sz_fit[retained] = np.maximum(sz_fit[retained], np.interp(centres, prior.s, prior.sig_z)[retained] + 0.02)
+                last_lat = float(centres[retained].max())
+                coast_frames = prior.coast_frames + 1
         model = TrackModel(
             s=res[:, 0], c=c_fit, theta=np.gradient(c_fit, centres), z=z_fit, sig_c=sc_fit, sig_z=sz_fit,
             rail=res[:, 6] > 0, lat_obs=obs_c, ver_obs=obs_z, floor=res[:, 9],
             wall_left=res[:, 10], wall_right=res[:, 11], rails=rails,
             observed_until=last_lat, rail_until=float(last_rail), calibration=self.calib.public(),
+            coast_frames=coast_frames, current_observed_until=current_observed_until,
         )
         self.prev = model
         # pose update for the next frame (EMA, uses this frame's rails)

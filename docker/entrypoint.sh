@@ -5,6 +5,6 @@ source /opt/ros/humble/setup.bash
 source /opt/gabarit/ros_ws/install/setup.bash
 # `docker run gabarit demo ...` and `docker run gabarit gabarit demo ...` both work
 case "${1:-}" in
-  detect|demo|play|web|evaluate|synthetic|test|help) set -- gabarit "$@" ;;
+  shell|workspace|bag|rviz|detect|demo|play|web|evaluate|synthetic|test|help) set -- gabarit "$@" ;;
 esac
 exec "$@"

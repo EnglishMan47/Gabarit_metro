@@ -3,6 +3,7 @@ Panels:
     Name: Displays
 Visualization Manager:
   Class: ""
+  Frame Rate: 10
   Displays:
     - Class: rviz_default_plugins/Grid
       Name: Grid
@@ -13,7 +14,7 @@ Visualization Manager:
       Name: Lidar
       Enabled: true
       Topic:
-        Value: /lidar_points
+        Value: /gabarit/view_cloud
         Reliability Policy: Best Effort
       Size (Pixels): 2
       Style: Points
@@ -21,7 +22,7 @@ Visualization Manager:
       Decay Time: 0
     - Class: rviz_default_plugins/PointCloud2
       Name: Obstacle points
-      Enabled: true
+      Enabled: false
       Topic:
         Value: /gabarit/obstacle_points
       Size (Pixels): 6
@@ -32,17 +33,22 @@ Visualization Manager:
       Name: Envelope and obstacles
       Enabled: true
       Topic:
-        Value: /gabarit/markers
+        Value: /gabarit/view_markers
   Global Options:
-    Fixed Frame: hesai_lidar
+    Fixed Frame: gabarit_view
     Background Color: 12; 16; 22
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
       Distance: 40
       Pitch: 0.35
-      Yaw: 1.57
+      Yaw: 3.14
       Focal Point:
-        X: 0
-        Y: -30
+        X: 30
+        Y: 0
         Z: 0
+Window Geometry:
+  Width: 1600
+  Height: 900
+  X: 0
+  Y: 0

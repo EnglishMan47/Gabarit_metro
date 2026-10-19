@@ -7,9 +7,9 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 const scene = new Scene3D($('scene'));
 const state = {
   ws: null, mode: 'playback', bags: [], bag: null, frames: 0, playing: false,
-  frame: null, timeline: [], answered: new Map(), toastFor: null, seen: new Set(),
-  perfHist: [], lastArrive: 0, fpsHist: [], shapes: {}, baseConfig: null,
-  token: null, brake: null, autoBrake: true, exempt: new Set(), busy: false, noReconnect: false, pendingOpen: null,
+  frame: null, timeline: [], alarmIds: new Set(),
+  perfHist: [], lastArrive: 0, fpsHist: [], shapes: {}, baseConfig: null, sensorProfiles: {},
+  token: null, busy: false, noReconnect: false, pendingOpen: null,
 };
 
 // ------------------------------------------------------------------ modal
@@ -48,6 +48,14 @@ const send = (obj) => { if (state.ws && state.ws.readyState === 1) state.ws.send
 function onJson(m) {
   if (m.type === 'hello') {
     state.mode = m.mode;
+    if (m.config) { state.baseConfig = m.config; setDetectorControls(m.config); }
+    if (m.sensor_profiles) {
+      state.sensorProfiles = m.sensor_profiles;
+      $('sensorProfile').replaceChildren(...Object.entries(m.sensor_profiles).map(([key, p]) => {
+        const option = document.createElement('option'); option.value = key; option.textContent = p.title; return option;
+      }));
+    }
+    ['sensorProfile', 'pApply', 'pReset'].forEach((id) => { $(id).disabled = m.mode === 'live'; });
     $('liveBadge').classList.toggle('hidden', m.mode !== 'live');
     $('transport').classList.toggle('hidden', m.mode === 'live');
     if (m.mode === 'live') {   // no seeking / synthetic obstacles on a live ROS 2 stream
@@ -77,30 +85,23 @@ function onJson(m) {
     fillBags(m.bags);
     if (state.pendingOpen) { $('bagSelect').value = state.pendingOpen; openBag(state.pendingOpen); state.pendingOpen = null; }
     else if (state.bag) $('bagSelect').value = state.bag.id;
-  } else if (m.type === 'brake') {
-    state.brake = m.cleared ? null : m;
-    if (m.cleared && m.released) state.released = { how: m.released, until: performance.now() + 6000 };
-    if (m.cleared) state.exempt = new Set(m.exempt || []);
-    if (state.frame) { renderStatus(state.frame); drawRadar(state.frame); }
-  } else if (m.type === 'hold_hint') {
-    flashHold();
   } else if (m.type === 'opened') {
     state.bag = m.bag; state.frames = m.frames; state.timeline = new Array(m.frames).fill(null);
-    state.seen.clear(); state.answered.clear(); state.exempt = new Set(); state.brake = null;
+    state.alarmIds.clear();
     drawTimeline(); $('tlEvents').innerHTML = ''; $('scanState').textContent = '';
   } else if (m.type === 'state') {
     state.playing = m.playing; $('btnPlay').innerHTML = m.playing ? '&#10074;&#10074;' : '&#9654;';
   } else if (m.type === 'timeline') {
+    if (m.bag && state.bag && m.bag !== state.bag.id) return;
     m.items.forEach((it) => { state.timeline[it.i] = it; });
     $('scanState').textContent = m.done ? `проанализировано ${m.total} кадров` : `анализ… ${m.n || 0} / ${m.total}`;
     if (m.done) { $('btnScan').textContent = 'Анализ всего проезда'; renderEvents(); }
     drawTimeline();
   } else if (m.type === 'synthetic') {
     if (m.cleared) $('synList').innerHTML = '';
-  } else if (m.type === 'journal') {
-    loadJournal();
+
   } else if (m.type === 'config') {
-    // applied
+    setDetectorControls(m.config);
   } else if (m.type === 'error') {
     console.warn(m.message);
   }
@@ -145,13 +146,13 @@ function onFrame(buf) {
   renderPerf(meta);
   drawRadar(meta);
   drawTimeline();
-  maybeToast(meta);
+  signalAlarm(meta);
 }
 
 function fillBags(bags) {
   state.bags = bags;
   // grouped, readable titles; the technical bag name stays in the tooltip
-  const order = ['С препятствиями', 'Штатные проезды (без препятствий)', 'Синтетические препятствия', 'Загруженные записи'];
+  const order = ['С препятствиями', 'Штатные проезды (без препятствий)', 'Синтетические препятствия', 'Записи без разметки', 'Загруженные записи'];
   const groups = new Map();
   bags.forEach((b) => { const g = b.group || 'Записи'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(b); });
   const keys = [...groups.keys()].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
@@ -160,19 +161,14 @@ function fillBags(bags) {
 }
 
 // ------------------------------------------------------------------ status
-const SHAPE_RU = { person: 'человек', child: 'ребёнок', box_50cm: 'ящик', box_30cm: 'предмет на рельсе', barrel: 'бочка', trolley: 'тележка', cable: 'кабель', glass: 'стеклянный объект' };
+const SHAPE_RU = { person: 'человек', person_sitting: 'человек сидя', person_lying: 'человек лёжа', child: 'ребёнок', box_50cm: 'ящик', box_30cm: 'предмет на рельсе', barrel: 'бочка', trolley: 'тележка', cable: 'кабель', glass: 'стеклянный объект' };
 
 function renderStatus(m) {
   const card = $('statusCard'), vp = $('viewport');
   let cls = 'state-ok', label = 'ПУТЬ СВОБОДЕН', main = `${fmt(m.free_distance_m)} м`, sub = 'путь проверен и свободен на это расстояние';
   if (m.status === 'OBSTACLE') {
     const o = m.obstacles[0];
-    cls = 'state-bad'; label = 'ПРЕПЯТСТВИЕ — ТОРМОЖЕНИЕ';
-    const ex = state.exempt || new Set();
-    if (!state.autoBrake) label = 'ПРЕПЯТСТВИЕ — ТОРМОЖЕНИЕ ВЫКЛЮЧЕНО';
-    else if (m.obstacles.length && m.obstacles.every((x) => ex.has(x.track_id))) {
-      cls = 'state-warn'; label = 'ОБЪЕКТ ПРОПУЩЕН ОПЕРАТОРОМ';
-    }
+    cls = 'state-bad'; label = 'ПРЕПЯТСТВИЕ';
     main = `${fmt(m.nearest_distance_m, 1)} м`;
     const when = m.time_to_obstacle_s ? `через ${fmt(m.time_to_obstacle_s, 1)} с` : 'поезд стоит';
     sub = `ближайший из ${m.obstacles.length}: ${obKind(o)}, смещение ${fmt(o.lateral_m, 2)} м · ${when}`;
@@ -183,61 +179,19 @@ function renderStatus(m) {
   } else if (m.status === 'DEGRADED') {
     cls = 'state-warn'; label = 'НЕТ ОПОРЫ ПУТИ'; main = '—'; sub = 'рельсы и стены не распознаны — проверьте установку лидара';
   }
-  const br = state.brake;
-  const rel = state.released && performance.now() < state.released.until ? state.released.how : '';
-  if (!br && rel === 'auto') {
-    sub = 'путь освободился — движение возобновлено автоматически';
-  } else if (!br && rel === 'override') {
-    sub = 'движение продолжено по решению оператора (записано в журнал)';
-  }
-  if (br && br.holding) {
-    cls = 'state-halt'; label = 'ПОЕЗД ОСТАНОВЛЕН — ПУТЬ ЗАНЯТ';
-    main = br.collision ? `${fmt(br.impact_kmh, 0)} км/ч у препятствия` : `${fmt(br.gap_m, 0)} м до препятствия`;
-    sub = br.collision
-      ? `объект обнаружен ближе тормозного пути (${fmt(br.stop_m, 0)} м); торможение снизило скорость с ${fmt(br.v0_kmh, 0)} км/ч`
-      : `тормозной путь ${fmt(br.stop_m, 0)} м за ${fmt(br.time_s, 1)} с с ${fmt(br.v0_kmh, 0)} км/ч`;
-  } else if (br) {
-    if (br.active) {
-      cls = 'state-bad'; label = 'ЭКСТРЕННОЕ ТОРМОЖЕНИЕ';
-      main = `${fmt(br.v_kmh, 0)} км/ч`;
-      sub = br.collision
-        ? `объект слишком близко: остановиться не успевает, скорость у препятствия ~${fmt(br.impact_kmh, 0)} км/ч`
-        : `остановка через ${fmt(Math.max(br.stop_m - br.travelled_m, 0), 0)} м, за ${fmt(br.gap_m, 0)} м до препятствия`;
-    } else if (br.stopped) {
-      cls = 'state-halt'; label = 'ПОЕЗД ОСТАНОВЛЕН';
-      main = `${fmt(br.gap_m, 0)} м`;
-      sub = `до препятствия · тормозной путь ${fmt(br.stop_m, 0)} м за ${fmt(br.time_s, 1)} с с ${fmt(br.v0_kmh, 0)} км/ч · ▶ — отпустить тормоз`;
-    } else {
-      cls = 'state-bad'; label = 'СТОЛКНОВЕНИЕ НЕ ПРЕДОТВРАЩЕНО';
-      main = `${fmt(br.impact_kmh, 0)} км/ч`;
-      sub = `объект обнаружен ближе тормозного пути (${fmt(br.stop_m, 0)} м); торможение снизило скорость с ${fmt(br.v0_kmh, 0)} км/ч`;
-    }
-  }
-  const holding = !!(br && br.holding);
-  $('holdBox').classList.toggle('hidden', !holding);
-  if (holding) {
-    const ids = (br.hold_ids || []).map((x) => `№${x}`).join(', ');
-    $('holdText').innerHTML = `Поезд удерживается системой безопасности${ids ? ` (объект ${ids})` : ''}. `
-      + '<b>Ничего нажимать не нужно:</b> когда путь освободится, движение возобновится автоматически.<br>'
-      + 'Если вы <b>убедились</b> (камера, доклад машиниста или диспетчера), что объект не мешает движению, — '
-      + 'нажмите «Продолжить движение». Отметка «Ложная тревога» тормоз не отпускает.';
-  }
-  $('btnPlay').classList.toggle('held', holding);
-  $('btnPlay').title = holding ? 'Поезд удерживается: путь занят. Используйте «Продолжить движение» в карточке статуса'
-    : 'Воспроизвести / пауза (пробел)';
   card.className = `status-card ${cls}`;
   $('statusLabel').textContent = label; $('statusMain').textContent = main; $('statusSub').textContent = sub;
   const note = $('statusNote');
-  note.classList.toggle('hidden', !m.turnout_ahead_m);
-  if (m.turnout_ahead_m) note.textContent = `Стрелка через ${fmt(m.turnout_ahead_m, 0)} м: маршрут за ней не определён`;
-  const halted = br && !br.active;
-  vp.classList.toggle('alarm', m.status === 'OBSTACLE' && !halted);
-  vp.classList.toggle('check', m.status === 'CHECK' && !br);
-  vp.classList.toggle('halt', !!halted && br.stopped);
-  $('mSpeed').textContent = br ? fmt(br.v_kmh, 0) : fmt(m.speed_kmh, 0);
+  const notes = [];
+  if (m.envelope_held) notes.push(`Габарит удержан по предыдущим кадрам (${m.envelope_coasted_frames}); текущие измерения — до ${fmt(m.observed_until_m, 0)} м`);
+  if (m.turnout_ahead_m) notes.push(`Стрелка через ${fmt(m.turnout_ahead_m, 0)} м: маршрут за ней не определён`);
+  note.classList.toggle('hidden', !notes.length); note.textContent = notes.join('. ');
+  vp.classList.toggle('alarm', m.status === 'OBSTACLE');
+  vp.classList.toggle('check', m.status === 'CHECK');
+  $('mSpeed').textContent = fmt(m.speed_kmh, 0);
   $('mFree').textContent = fmt(m.free_distance_m, 0);
-  $('mStop').textContent = br ? fmt(Math.max(br.stop_m - br.travelled_m, 0), 0) : fmt(m.stopping_distance_m, 0);
-  $('mTtc').textContent = !br && m.time_to_obstacle_s ? fmt(m.time_to_obstacle_s, 1) : '—';
+  $('mEnvelope').textContent = fmt(m.envelope_until_m ?? m.observed_until_m, 0);
+  $('mTtc').textContent = fmt(m.time_to_obstacle_s, 1);
   const fps = state.fpsHist.length ? state.fpsHist.reduce((a, b) => a + b, 0) / state.fpsHist.length : null;
   const ms = m.timing_ms.total;
   $('sysInfo').textContent = `обработка ${fmt(ms, 0)} мс` + (state.playing || state.mode === 'live' ? ` · ${fmt(fps, 1)} кадр/с` : '');
@@ -245,7 +199,7 @@ function renderStatus(m) {
   if (m.frames) $('frameLabel').textContent = `кадр ${m.frame + 1} / ${m.frames}`;
   $('timeLabel').textContent = m.bag_time_s !== undefined ? `${fmt(m.bag_time_s, 1)} с записи` : '';
   const cal = m.calibration || {};
-  $('calibBox').innerHTML = `<b>Самокалибровка по рельсам</b><br>высота лидара над головкой рельса: ${fmt(cal.height_m, 2)} м<br>тангаж ${fmt(cal.pitch_deg, 2)}°, крен ${fmt(cal.roll_deg, 2)}°<br>путь подтверждён до ${fmt(m.observed_until_m, 0)} м, рельсы — до ${fmt(m.track.rail_until, 0)} м`;
+  $('calibBox').innerHTML = `<b>Самокалибровка по рельсам</b><br>высота лидара над головкой рельса: ${fmt(cal.height_m, 2)} м<br>тангаж ${fmt(cal.pitch_deg, 2)}°, крен ${fmt(cal.roll_deg, 2)}°<br>измерения до ${fmt(m.observed_until_m, 0)} м, габарит до ${fmt(m.envelope_until_m ?? m.observed_until_m, 0)} м<br>рельсы — до ${fmt(m.track.rail_until, 0)} м · фильтр убрал ${fmt((m.points || {}).filtered || 0)} изолированных возвратов`;
 }
 
 function obKind(o) {
@@ -260,19 +214,12 @@ function obKind(o) {
 function renderObstacles(m) {
   const all = [...m.obstacles.map((o) => ({ ...o, conf: true })), ...m.pending.map((o) => ({ ...o, conf: false }))];
   $('obstacles').innerHTML = all.slice(0, 5).map((o) => {
-    const key = `${state.bag ? state.bag.id : 'live'}#${o.track_id}`;
-    const ans = state.answered.get(key);
-    const verdict = ans ? `<div class="ob-verdict ${ans === 'confirmed' ? 'yes' : 'no'}">оператор: ${ans === 'confirmed' ? 'подтверждено' : 'ложная тревога'}</div>` : '';
-    const actions = o.conf && !ans ? `<div class="ob-actions"><button data-v="confirmed" data-id="${o.track_id}">Подтвердить</button><button data-v="false" data-id="${o.track_id}">Ложная</button></div>` : '';
     return `<div class="ob ${o.conf ? '' : 'pending'} ${o.low ? 'low' : ''}" data-id="${o.track_id}">
       <div class="ob-top"><span class="ob-dist">${fmt(o.distance_m, 1)} м</span><span class="ob-kind">${o.conf ? 'подтверждено' : 'проверка'} · №${o.track_id}</span></div>
       <div class="ob-info">${obKind(o)} · смещение ${fmt(o.lateral_m, 2)} м · высота ${fmt(o.box.h[0], 2)}–${fmt(o.box.h[1], 2)} м</div>
       <div class="ob-info">${o.points} точек на ${o.rings} лучах · обнаружен с ${fmt(o.first_seen_m, 0)} м · уверенность ${fmt(o.confidence * 100, 0)}%</div>
-      ${verdict}${actions}</div>`;
+      </div>`;
   }).join('');
-  $('obstacles').querySelectorAll('button[data-v]').forEach((b) => b.onclick = (e) => {
-    e.stopPropagation(); answer(Number(b.dataset.id), b.dataset.v);
-  });
   $('obstacles').querySelectorAll('.ob').forEach((el) => el.onclick = () => { setCam('target'); });
 }
 
@@ -281,61 +228,29 @@ function renderSynthetic(m) {
   $('synList').innerHTML = syn.map((o) => `<div class="synitem"><span>${SHAPE_RU[o.shape] || o.shape}</span><span>${fmt(o.s, 1)} м, смещение ${fmt(o.d, 1)} м</span></div>`).join('');
 }
 
-// ------------------------------------------------------------------ operator
-function answer(trackId, verdict) {
-  const m = state.frame;
-  const o = [...m.obstacles, ...m.pending].find((x) => x.track_id === trackId) || {};
-  const key = `${state.bag ? state.bag.id : 'live'}#${trackId}`;
-  state.answered.set(key, verdict);
-  send({ cmd: 'feedback', bag: state.bag ? state.bag.id : 'live', frame: m.frame, track_id: trackId, verdict,
-    distance_m: o.distance_m, lateral_m: o.lateral_m, height_m: o.box ? o.box.h[1] : null,
-    synthetic: (m.synthetic || []).length > 0 });
-  if (state.toastFor === key) hideToast();
-  renderObstacles(m);
-}
-
-function toastText(o) {
-  return `<b>${fmt(o.distance_m, 1)} м</b> — ${obKind(o)}, смещение от оси ${fmt(o.lateral_m, 2)} м.<br>Подтвердите обнаружение: решение попадёт в журнал оператора. Торможение выполняется автоматически и от ответа не зависит.`;
-}
-
-function maybeToast(m) {
-  if (state.toastFor) {
-    // keep the request in step with its object; drop it once the object is gone
-    const cur = m.obstacles.find((x) => x.track_id === state.toastTrack);
-    if (cur) $('toastBody').innerHTML = toastText(cur);
-    else hideToast();
-  }
-  for (const o of m.obstacles) {
-    const key = `${state.bag ? state.bag.id : 'live'}#${o.track_id}`;
-    if (state.seen.has(key)) continue;
-    state.seen.add(key);
-    if (state.answered.has(key)) continue;
-    state.toastFor = key;
-    state.toastTrack = o.track_id;
-    $('toastBody').innerHTML = toastText(o);
-    $('toast').classList.remove('hidden');
-    beep();
-  }
-}
-function hideToast() { $('toast').classList.add('hidden'); state.toastFor = null; }
-$('toastConfirm').onclick = () => answer(state.toastTrack, 'confirmed');
-$('toastReject').onclick = () => answer(state.toastTrack, 'false');
-$('toastLater').onclick = hideToast;
-
-let audio = null;
-function beep() {
+let alarmAudio = null;
+$('soundOn').onchange = () => {
   if (!$('soundOn').checked) return;
-  audio = audio || new AudioContext();
-  const o = audio.createOscillator(), g = audio.createGain();
-  o.frequency.value = 880; o.type = 'square'; g.gain.value = 0.05;
-  o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.25);
+  alarmAudio = alarmAudio || new AudioContext();
+  alarmAudio.resume().catch(() => {});
+};
+function signalAlarm(m) {
+  const active = new Set(m.obstacles.map((o) => o.track_id));
+  if ($('soundOn').checked && alarmAudio && [...active].some((id) => !state.alarmIds.has(id))) {
+    const tone = alarmAudio.createOscillator(), gain = alarmAudio.createGain();
+    tone.frequency.value = 880; tone.type = 'square'; gain.gain.value = 0.05;
+    tone.connect(gain).connect(alarmAudio.destination);
+    tone.onended = () => { tone.disconnect(); gain.disconnect(); };
+    tone.start(); tone.stop(alarmAudio.currentTime + 0.25);
+  }
+  state.alarmIds = active;
 }
 
-// ------------------------------------------------------------------ radar strip
 function drawRadar(m) {
   const cv = $('radar'), g = cv.getContext('2d');
   const W = cv.width = cv.clientWidth * devicePixelRatio, H = cv.height = cv.clientHeight * devicePixelRatio;
-  const k = devicePixelRatio, L = 40 * k, R = W - 20 * k, maxS = 200;
+  const k = devicePixelRatio, L = 40 * k, R = W - 20 * k, maxS = m.analysis_range_m || 200;
+  cv.title = `Схема пути: 0–${maxS} м`;
   const X = (s) => L + (R - L) * Math.min(Math.max(s, 0), maxS) / maxS;
   g.clearRect(0, 0, W, H);
   g.font = `${11 * k}px Segoe UI, sans-serif`;
@@ -355,24 +270,11 @@ function drawRadar(m) {
   g.globalAlpha = 1;
   // ticks
   g.fillStyle = css('--muted'); g.textAlign = 'center';
-  for (let s = 0; s <= maxS; s += 25) {
+  for (let s = 0; s <= maxS; s += maxS > 250 ? 50 : 25) {
     g.fillRect(X(s), y1, k, 5 * k);
     g.fillText(`${s}`, X(s), y1 + 16 * k);
   }
   g.textAlign = 'left'; g.fillText('м', R + 4 * k, y1 + 16 * k);
-  // stopping distance
-  const stop = m.stopping_distance_m || 0;
-  const info = css('--info');
-  const br = state.brake;
-  if (br && (br.active || br.stopped)) {   // where the braking train stops
-    const at = Math.max(br.stop_m - br.travelled_m, 0);
-    g.fillStyle = info; g.fillRect(X(at) - 2 * k, y0 - 6 * k, 4 * k, y1 - y0 + 8 * k);
-    if (!br.stopped) g.fillText(`остановка через ${at.toFixed(0)} м`, Math.min(X(at) + 6 * k, R - 130 * k), y0 - 10 * k);
-  } else if (stop > 1) {
-    g.strokeStyle = info; g.setLineDash([4 * k, 3 * k]); g.lineWidth = 1.5 * k;
-    g.beginPath(); g.moveTo(X(stop), y0 - 8 * k); g.lineTo(X(stop), y1 + 2 * k); g.stroke(); g.setLineDash([]);
-    g.fillStyle = info; g.fillText(`тормозной путь ${stop.toFixed(0)} м`, Math.min(X(stop) + 4 * k, R - 120 * k), y0 - 10 * k);
-  }
   // train
   g.fillStyle = '#3b82f6'; g.fillRect(L - 30 * k, y0 + 4 * k, 26 * k, y1 - y0 - 8 * k);
   // objects
@@ -437,7 +339,7 @@ function renderEvents() {
 // ------------------------------------------------------------------ perf
 function renderPerf(m) {
   const t = m.timing_ms;
-  const rows = [['decode', 'Декодирование'], ['track', 'Калибровка и путь'], ['egomotion', 'Эго-движение'], ['detect', 'Кандидаты'], ['tracking', 'Треки'], ['total', 'Всего']];
+  const rows = [['decode', 'Преобразование облака'], ['track', 'Калибровка и путь'], ['egomotion', 'Эго-движение'], ['filter', 'Фильтр'], ['detect', 'Кандидаты'], ['tracking', 'Треки'], ['total', 'Всего']];
   $('perfBars').innerHTML = rows.map(([k, name]) => `<div class="perf-row"><span>${name}</span><div class="perf-bar"><i style="width:${Math.min(100, (t[k] || 0))}%;${k === 'total' ? 'background:' + ((t.total || 0) > 100 ? '#ef4444' : '#22c55e') : ''}"></i></div><span>${fmt(t[k], 1)} мс</span></div>`).join('');
   state.perfHist.push(t.total || 0);
   if (state.perfHist.length > 150) state.perfHist.shift();
@@ -450,14 +352,6 @@ function renderPerf(m) {
   state.perfHist.forEach((v, i) => { const x = i / 150 * W; if (i) g.lineTo(x, y(v)); else g.moveTo(x, y(v)); });
   g.stroke();
   g.fillStyle = css('--muted'); g.font = `${10 * k}px sans-serif`; g.fillText('100 мс', 4 * k, y(100) - 3 * k);
-}
-
-// ------------------------------------------------------------------ journal
-async function loadJournal() {
-  try {
-    const rows = await (await fetch('/api/journal')).json();
-    $('journal').innerHTML = rows.slice(-200).reverse().map((r) => `<div class="jrow"><span class="${r.verdict === 'confirmed' ? 'v-confirmed' : 'v-false'}">${{ confirmed: 'ПОДТВЕРЖДЕНО', override: 'ДВИЖЕНИЕ ПРОДОЛЖЕНО ОПЕРАТОРОМ' }[r.verdict] || 'ЛОЖНАЯ ТРЕВОГА'}</span> · ${r.time.replace('T', ' ')}<br>${r.bag} · кадр ${r.frame} · №${r.track_id} · ${fmt(r.distance_m, 1)} м${r.synthetic ? ' · испытание' : ''}</div>`).join('') || '<span class="hint">решений оператора пока нет</span>';
-  } catch (e) { /* offline */ }
 }
 
 // ------------------------------------------------------------------ controls
@@ -481,7 +375,6 @@ document.querySelectorAll('#cams button').forEach((b) => b.onclick = () => setCa
 document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => {
   document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('active', x === b));
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('hidden', t.id !== `tab-${b.dataset.tab}`));
-  if (b.dataset.tab === 'log') loadJournal();
 });
 
 document.querySelectorAll('[data-layer]').forEach((c) => c.onchange = () => scene.setLayer(c.dataset.layer, c.checked));
@@ -490,19 +383,26 @@ $('pointSize').oninput = (e) => scene.setPointSize(Number(e.target.value));
 
 $('synDist').oninput = (e) => { $('synDistVal').textContent = e.target.value; };
 $('synLat').oninput = (e) => { $('synLatVal').textContent = Number(e.target.value).toFixed(1); };
-$('synAdd').onclick = () => send({ cmd: 'add_obstacle', shape: $('synShape').value, s: Number($('synDist').value), d: Number($('synLat').value) });
+$('synYaw').oninput = (e) => { $('synYawVal').textContent = e.target.value; };
+$('synAdd').onclick = () => send({ cmd: 'add_obstacle', shape: $('synShape').value, s: Number($('synDist').value), d: Number($('synLat').value), yaw_deg: Number($('synYaw').value) });
 $('synClear').onclick = () => send({ cmd: 'clear_obstacles' });
 $('scene').addEventListener('click', (e) => {
   if (!e.shiftKey) return;
   const p = scene.pickTrack(e.clientX, e.clientY);
-  if (p) send({ cmd: 'add_obstacle', shape: $('synShape').value, s: p.s, d: Math.max(-1.5, Math.min(1.5, p.d)) });
+  if (p) send({ cmd: 'add_obstacle', shape: $('synShape').value, s: p.s, d: Math.max(-1.5, Math.min(1.5, p.d)), yaw_deg: Number($('synYaw').value) });
 });
 
 const PRESETS = {
   balanced: {},
   strict: { tracking: { confirm_hits: 4, confirm_window: 5, far_confirm_hits: 8, far_confirm_window: 10 }, detection: { min_score: 0.65 } },
-  sensitive: { tracking: { confirm_hits: 2, confirm_window: 3, far_confirm_hits: 4, far_confirm_window: 6 }, detection: { min_score: 0.4, max_range: 200 } },
+  sensitive: { tracking: { confirm_hits: 2, confirm_window: 3, far_confirm_hits: 4, far_confirm_window: 6 }, detection: { min_score: 0.4 } },
 };
+function setDetectorControls(cfg) {
+  [['pWidth', cfg.envelope.width], ['pHeight', cfg.envelope.height],
+    ['pMinH', cfg.envelope.min_height], ['pRange', Math.min(cfg.track.horizon, cfg.detection.max_range)]].forEach(([id, value]) => {
+    $(id).value = value; $(id).dispatchEvent(new Event('input'));
+  });
+}
 [['pWidth', 'pWidthVal', 1], ['pHeight', 'pHeightVal', 1], ['pMinH', 'pMinHVal', 2], ['pRange', 'pRangeVal', 0]].forEach(([id, lab, d]) => {
   $(id).oninput = (e) => { $(lab).textContent = Number(e.target.value).toFixed(d); };
 });
@@ -510,11 +410,19 @@ $('pApply').onclick = () => {
   const p = JSON.parse(JSON.stringify(PRESETS[$('preset').value]));
   p.envelope = { width: Number($('pWidth').value), height: Number($('pHeight').value), min_height: Number($('pMinH').value) };
   p.detection = { ...(p.detection || {}), max_range: Number($('pRange').value) };
+  p.track = { horizon: Number($('pRange').value) };
+  const profile = state.sensorProfiles[$('sensorProfile').value];
+  if (profile) p.sensor = profile.sensor;
   send({ cmd: 'config', overrides: p });
+};
+$('sensorProfile').onchange = () => {
+  const profile = state.sensorProfiles[$('sensorProfile').value];
+  if (profile) { $('pRange').value = profile.max_range_m; $('pRange').dispatchEvent(new Event('input')); }
 };
 $('pReset').onclick = () => {
   $('preset').value = 'balanced';
-  [['pWidth', 2.2], ['pHeight', 3.0], ['pMinH', 0.12], ['pRange', 200]].forEach(([id, v]) => { $(id).value = v; $(id).dispatchEvent(new Event('input')); });
+  $('sensorProfile').value = 'current';
+  if (state.baseConfig) setDetectorControls(state.baseConfig);
   send({ cmd: 'config', overrides: {} });
 };
 
@@ -559,39 +467,6 @@ $('uploadInput').onchange = () => {
   xhr.onerror = () => showModal('Запись не загружена', 'соединение прервано', [['Закрыть', hideModal, true]]);
   showModal('Загрузка записи', files.map((f) => f.name).join(', '), [], 0);
   xhr.send(fd);
-};
-
-// braking mode on the main screen
-function setBrakeMode(auto) {
-  $('bmAuto').classList.toggle('on', auto);
-  $('bmOff').classList.toggle('on', !auto);
-  $('bmNote').classList.toggle('hidden', auto);
-  state.autoBrake = auto;
-  send({ cmd: 'autobrake', value: auto });
-  if (state.frame) renderStatus(state.frame);   // the card reflects the mode at once, also on pause
-}
-$('bmAuto').onclick = () => setBrakeMode(true);
-$('bmOff').onclick = () => {
-  showModal('Выключить торможение?',
-    'Поезд перестанет останавливаться перед подтверждёнными препятствиями — это режим просмотра записи, а не штатная работа. '
-    + 'Тревоги и журнал продолжат работать.',
-    [['Выключить', () => { hideModal(); setBrakeMode(false); }, true], ['Отмена', hideModal]]);
-};
-
-// held train: operator override
-function flashHold() {
-  const box = $('holdBox');
-  box.classList.remove('flash'); void box.offsetWidth; box.classList.add('flash');
-}
-$('btnResume').onclick = () => {
-  const br = state.brake;
-  if (!br || !br.holding) return;
-  const ids = (br.hold_ids || []).map((x) => `№${x}`).join(', ');
-  showModal('Продолжить движение при обнаруженном объекте?',
-    `Система видит на пути объект ${ids}. Продолжайте, только если убедились, что он не мешает движению `
-    + '(ложное срабатывание, объект убран за габарит). Решение будет записано в журнал от вашего имени. '
-    + 'Если впереди появится другое препятствие, поезд снова затормозит сам.',
-    [['Да, путь свободен — продолжить', () => { hideModal(); send({ cmd: 'resume' }); }, true], ['Отмена', hideModal]]);
 };
 
 document.addEventListener('keydown', (e) => {

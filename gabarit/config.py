@@ -7,6 +7,7 @@ programmatically with :meth:`Config.with_overrides`.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,38 @@ class SensorConfig:
     # Smoothing of the per-frame calibration (0..1, weight of the new frame).
     calibration_alpha: float = 0.15
     min_range: float = 1.0
+    # Raw axis pointing up. Falcon Prime native coordinates are forward +z,
+    # up +x; a ROS driver may already have converted them to REP-103.
+    up_axis: str = "+z"
+    scan_pattern: str = "mechanical"   # mechanical or mirror
+    # Pandar bags use adjacent columns for the two returns of one firing.
+    # Disable for single return and for formats without this exact layout.
+    dual_returns: bool = True
+    azimuth_resolution_deg: float = 0.083
+    elevation_resolution_deg: float = 0.125
+    # A nonuniform mirror scan can be coarser outside its ROI. Use the
+    # coarse physical spacing for density, retaining fine bands for beams.
+    density_azimuth_resolution_deg: float = 0.0
+    density_elevation_resolution_deg: float = 0.0
+
+    def __post_init__(self) -> None:
+        axes = {sign + axis for sign in ("+", "-") for axis in "xyz"}
+        if self.forward_axis not in axes or self.up_axis not in axes:
+            raise ValueError("sensor forward_axis and up_axis must be signed axes: +x, -x, +y, -y, +z, -z")
+        if self.forward_axis[1] == self.up_axis[1]:
+            raise ValueError("sensor forward_axis and up_axis must be perpendicular")
+        if self.scan_pattern not in ("mechanical", "mirror"):
+            raise ValueError("sensor scan_pattern must be mechanical or mirror")
+        for name in ("azimuth_resolution_deg", "elevation_resolution_deg"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0 or value > 10:
+                raise ValueError(f"sensor {name} must be finite and within (0, 10] degrees")
+        for name in ('density_azimuth_resolution_deg','density_elevation_resolution_deg'):
+            value = getattr(self,name)
+            if not math.isfinite(value) or value < 0 or value > 10:
+                raise ValueError(f"sensor {name} must be finite and within [0, 10] degrees")
+        if not math.isfinite(self.min_range) or self.min_range < 0:
+            raise ValueError("sensor min_range must be finite and nonnegative")
 
 
 @dataclass(frozen=True)
@@ -49,12 +82,33 @@ class TrackConfig:
     temporal_weight: float = 0.6   # weight of the previous frame path prior
     smooth_lateral: float = 3e6    # penalty on the change of curvature of the path
     smooth_vertical: float = 3e7
+    hold_missing_frames: int = 4   # retain the last observed path on short cloud dropouts
+
+    def __post_init__(self) -> None:
+        if self.hold_missing_frames < 0:
+            raise ValueError("track hold_missing_frames must be nonnegative")
+
+
+@dataclass(frozen=True)
+class FilterConfig:
+    enabled: bool = True
+    voxel_near: float = 0.08
+    voxel_growth: float = 0.003
+    min_neighbors: int = 1
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.voxel_near) or self.voxel_near <= 0:
+            raise ValueError("filter voxel_near must be finite and positive")
+        if not math.isfinite(self.voxel_growth) or self.voxel_growth < 0:
+            raise ValueError("filter voxel_growth must be finite and nonnegative")
+        if self.min_neighbors < 1:
+            raise ValueError("filter min_neighbors must be at least 1")
 
 
 @dataclass(frozen=True)
 class EnvelopeConfig:
     # Clearance envelope (gabarit) around the track centre line.
-    width: float = 2.2
+    width: float = 2.1
     height: float = 3.0
     min_height: float = 0.12       # above rail head
     lateral_margin: float = 0.0    # extra safety margin on each side
@@ -81,6 +135,11 @@ class DetectionConfig:
     low_max_range: float = 80.0
     low_max_lateral: float = 0.95
     low_min_points: int = 3
+    low_min_protrusion: float = 0.08  # resolve a 0.10 m object above the local rail head
+    low_min_width: float = 0.12  # sub-0.13 m bumps need width beyond the narrow rail-head echo
+    low_dense_range: float = 35.0  # short-range body sampling; retain stricter far rail rejection
+    low_single_beam_range: float = 50.0  # broad single-beam body evidence; only verified standstill, confirmed slowly
+    hanging_max_range: float = 60.0  # thin vertical body crossing the upper envelope boundary
 
 
 @dataclass(frozen=True)
@@ -92,6 +151,10 @@ class TrackingConfig:
     drop_misses: int = 4
     low_confirm_hits: int = 6      # low objects: hits within the longer window
     low_confirm_window: int = 8
+    low_body_confirm_hits: int = 3  # compact low body with transverse/multi-beam support
+    low_body_confirm_window: int = 4
+    low_single_confirm_hits: int = 8  # single-beam bodies require a standing train and longer persistence
+    low_single_confirm_window: int = 16
     far_distance: float = 60.0     # beyond: the path is less certain, confirm longer
     far_confirm_hits: int = 6
     far_confirm_window: int = 8
@@ -106,12 +169,7 @@ class Config:
     envelope: EnvelopeConfig = field(default_factory=EnvelopeConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
-    # Emergency braking of a driverless train on an obstacle alarm: the system
-    # latency from the confirmed alarm to the brake command, and the
-    # deceleration with the emergency (rail) brakes. Used for the stopping
-    # distance shown to the operator and for the braking of the demo player.
-    braking_deceleration: float = 2.5
-    reaction_time: float = 0.3
+    filter: FilterConfig = field(default_factory=FilterConfig)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -1,0 +1,16 @@
+# Falcon Prime when its ROS driver has ALREADY converted native xyz to REP-103.
+# Use only after inspecting the bag frame axes: x forward, y left, z up.
+sensor:
+  forward_axis: +x
+  up_axis: +z
+  scan_pattern: mirror
+  dual_returns: false
+  azimuth_resolution_deg: 0.09
+  elevation_resolution_deg: 0.08
+  density_azimuth_resolution_deg: 0.18
+  density_elevation_resolution_deg: 0.24
+  min_range: 1.5
+track:
+  horizon: 350.0
+detection:
+  max_range: 350.0

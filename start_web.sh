@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Gabarit: web interface without Docker/ROS (Linux/macOS).
 #   ./start_web.sh [folder with bags]
-#   without a folder: data/extracted/for_hackathon and data/extracted/synthetic_organizers
+#   without a folder: recursively scan data/extracted
 set -e
 cd "$(dirname "$0")"
 [ -x .venv/bin/python ] || ./install.sh

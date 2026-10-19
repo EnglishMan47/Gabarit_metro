@@ -1,0 +1,39 @@
+services:
+  gabarit:
+    build: .
+    image: gabarit:local
+    init: true
+    stdin_open: true
+    tty: true
+    shm_size: 1gb
+    stop_grace_period: 45s
+    ports:
+      - "127.0.0.1:${GABARIT_GUI_PORT:-6080}:6080"
+      - "127.0.0.1:${GABARIT_WEB_PORT:-8080}:8080"
+    environment:
+      GABARIT_GUI: ${GABARIT_GUI:-web}
+      GABARIT_INPUT_QOS: ${GABARIT_INPUT_QOS:-auto}
+      GABARIT_CACHE_MAX_GB: ${GABARIT_CACHE_MAX_GB:-16}
+      GABARIT_CONFIG: /opt/gabarit/config/${GABARIT_CONFIG_FILE:-gabarit.yaml}
+      LIBGL_ALWAYS_SOFTWARE: "${LIBGL_ALWAYS_SOFTWARE:-1}"
+      QT_X11_NO_MITSHM: "1"
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+    volumes:
+      - type: bind
+        source: ${GABARIT_BAGS:-./data}
+        target: /data
+        read_only: true
+      - type: bind
+        source: ./config
+        target: /opt/gabarit/config
+        read_only: true
+      - type: bind
+        source: ./results
+        target: /output
+      - type: volume
+        source: bag-cache
+        target: /var/cache/gabarit
+    command: ["gabarit", "workspace"]
+
+volumes:
+  bag-cache:

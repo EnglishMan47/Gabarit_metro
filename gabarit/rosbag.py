@@ -10,7 +10,7 @@ import sqlite3
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator
 
 import numpy as np
 
@@ -35,6 +35,48 @@ class RawCloud:
     @property
     def count(self) -> int:
         return self.height * self.width
+
+
+def pointcloud2_array(data: bytes | memoryview, fields: Iterable[tuple[str, int, int, int]],
+                      height: int, width: int, point_step: int, row_step: int,
+                      is_bigendian: bool = False) -> np.ndarray:
+    """Decode PointCloud2 records, including row padding and array-valued fields.
+
+    ``fields`` contains (name, offset, ROS datatype, count) tuples. The result
+    has one structured record per point; padding bytes never become points.
+    Shared by the offline CDR reader and the live ROS adapter.
+    """
+    if min(height, width, point_step, row_step) < 0:
+        raise CdrError("negative PointCloud2 dimensions or strides")
+    if height * width and point_step == 0:
+        raise CdrError("point_step must be positive for a non-empty cloud")
+    if row_step < width * point_step:
+        raise CdrError("row_step is shorter than a row of points")
+    if memoryview(data).nbytes < height * row_step:
+        raise CdrError("point data truncated (including row padding)")
+    names, formats, offsets = [], [], []
+    order = ">" if is_bigendian else "<"
+    for name, offset, datatype, count in fields:
+        if datatype not in _DTYPES or count < 1:
+            raise CdrError(f"unsupported point field {name}: datatype={datatype}, count={count}")
+        if name in names:
+            raise CdrError(f"duplicate point field {name}")
+        base = np.dtype(order + _DTYPES[datatype])
+        if offset < 0 or offset + base.itemsize * count > point_step:
+            raise CdrError(f"point field {name} exceeds point_step")
+        names.append(name)
+        formats.append(base if count == 1 else (base, (count,)))
+        offsets.append(offset)
+    try:
+        dtype = np.dtype({"names": names, "formats": formats,
+                          "offsets": offsets, "itemsize": point_step})
+        if height * width == 0:
+            return np.empty(0, dtype=dtype)
+        arr = np.ndarray((height, width), dtype=dtype, buffer=data,
+                         strides=(row_step, point_step))
+        return arr.reshape(-1)
+    except (TypeError, ValueError) as err:
+        raise CdrError(f"invalid PointCloud2 layout: {err}") from err
 
 
 def decode_pointcloud2(payload: bytes | memoryview) -> RawCloud:
@@ -73,11 +115,16 @@ def decode_pointcloud2(payload: bytes | memoryview) -> RawCloud:
 
     def u8() -> int:
         nonlocal o
+        if o >= len(buf):
+            raise CdrError("truncated message")
         v = buf[o]
         o += 1
         return v
 
+    # builtin_interfaces/Time.sec is signed, unlike the following uint32.
     sec = u32()
+    if sec >= 2**31:
+        sec -= 2**32
     nsec = u32()
     frame_id = string()
     height = u32()
@@ -88,24 +135,15 @@ def decode_pointcloud2(payload: bytes | memoryview) -> RawCloud:
         offset = u32()
         datatype = u8()
         count = u32()
-        if datatype not in _DTYPES or count != 1:
-            raise CdrError(f"unsupported point field {name}")
-        fields.append((name, offset, datatype))
+        fields.append((name, offset, datatype, count))
     big = bool(u8())
     step = u32()
-    u32()  # row_step
+    row_step = u32()
     size = u32()
-    order = ">" if big else "<"
-    dtype = np.dtype({
-        "names": [f[0] for f in fields],
-        "formats": [order + _DTYPES[f[2]] for f in fields],
-        "offsets": [f[1] for f in fields],
-        "itemsize": step,
-    })
-    n = height * width
-    if size < n * step or o + n * step > len(buf):
+    if o + size > len(buf):
         raise CdrError("point data truncated")
-    arr = np.frombuffer(buf, dtype=dtype, count=n, offset=o)
+    arr = pointcloud2_array(memoryview(buf)[o:o + size], fields, height, width,
+                           step, row_step, big)
     return RawCloud(sec + nsec * 1e-9, frame_id, height, width, arr)
 
 
@@ -119,6 +157,7 @@ class BagInfo:
     frame_count: int
     start_ns: int
     end_ns: int
+    storage_paths: tuple[Path, ...] = ()
 
     @property
     def duration_s(self) -> float:
@@ -134,6 +173,7 @@ class BagInfo:
             "topic": self.topic,
             "frames": self.frame_count,
             "duration_s": round(self.duration_s, 2),
+            "storage_files": len(self.storage_paths) if self.storage_paths else 1,
         }
 
 
@@ -146,6 +186,11 @@ _TITLES = {
     "roundT_squareT_pressureGate_squareT": "Смена сечения и гермозатвор · кривая",
     "squareT_platform_squareT_switch": "Платформа, стоянка, стрелочный перевод",
     "cloud_with_fake_obj": "Испытательный проезд · 10 препятствий разного размера через ~100 м",
+    "falcon_test_second_dark": "Falcon Prime · новая реальная запись · профиль Falcon ROS",
+    "new_data": "Новая реальная запись · Pandar · 221 часть",
+    "synthetic_platform_cloud_only": "Новая синтетика · платформа",
+    "synthetic_switch_cloud_only": "Новая синтетика · стрелка",
+    "synthetic_tunnels_cloud_only": "Новая синтетика · тоннели",
 }
 _WORDS = {
     "roundT": "круглый тоннель", "squareT": "прямоугольный тоннель", "doubleT": "двухпутный тоннель",
@@ -160,8 +205,11 @@ def bag_title(name: str) -> tuple[str, str]:
         group = "Синтетические препятствия"
     elif "obstacle" in low:
         group = "С препятствиями"
-    else:
+    elif name in {"doubleT_platform", "roundT_doubleT", "roundT_pressureGate_roundT",
+                  "roundT_squareT_pressureGate_squareT", "squareT_platform_squareT_switch"}:
         group = "Штатные проезды (без препятствий)"
+    else:
+        group = "Записи без разметки"
     if name in _TITLES:
         return _TITLES[name], group
     words = [_WORDS.get(w, w) for w in name.split("_") if w]
@@ -175,27 +223,71 @@ def _connect(path: Path) -> sqlite3.Connection:
     return con
 
 
+def _bag_storage_paths(path: Path) -> tuple[Path, ...]:
+    """Resolve all SQLite chunks of a directory in metadata order.
+
+    An explicitly selected .db3 remains a single-file selection; directory
+    discovery always uses the whole recording, not the first lexical chunk.
+    """
+    if path.suffix == ".db3":
+        return (path,) if path.is_file() else ()
+    metadata = path / "metadata.yaml"
+    if metadata.exists():
+        import yaml
+        content = yaml.safe_load(metadata.read_text(encoding="utf-8")) or {}
+        names = content.get("rosbag2_bagfile_information", {}).get("relative_file_paths", [])
+        if names:
+            result = []
+            for name in names:
+                candidate = (path / name).resolve()
+                if not candidate.is_relative_to(path.resolve()):
+                    raise ValueError("bag metadata references a path outside its directory")
+                if candidate.suffix != ".db3":
+                    raise ValueError("offline reader requires SQLite .db3 storage; use ROS for MCAP")
+                if not candidate.is_file():
+                    raise FileNotFoundError(candidate)
+                if candidate in result:
+                    raise ValueError("duplicate storage file in bag metadata")
+                result.append(candidate)
+            return tuple(result)
+    return tuple(sorted(path.glob("*.db3")))
+
+
 def open_bag(path: str | Path, root: Path | None = None, topic: str | None = None) -> BagInfo:
     """Open a bag given a directory (with *.db3) or a .db3 file."""
-    path = Path(path)
-    db = path if path.suffix == ".db3" else next(iter(sorted(path.glob("*.db3"))), None)
-    if db is None or not db.exists():
+    path = Path(path).resolve()
+    paths = _bag_storage_paths(path)
+    if not paths:
         raise FileNotFoundError(f"no .db3 file in {path}")
-    con = _connect(db)
-    try:
-        rows = con.execute("SELECT id, name, type FROM topics").fetchall()
-        cands = [r for r in rows if r[2] == POINTCLOUD2 and (topic is None or r[1] == topic)]
-        if not cands:
-            raise ValueError(f"no PointCloud2 topic in {db}")
-        tid, tname, _ = cands[0]
-        cnt, t0, t1 = con.execute(
-            "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM messages WHERE topic_id=?", (tid,)
-        ).fetchone()
-    finally:
-        con.close()
-    bag_dir = db.parent
+    selected = None
+    count, starts, ends = 0, [], []
+    for db in paths:
+        con = _connect(db)
+        try:
+            rows = con.execute("SELECT id, name, type FROM topics ORDER BY id").fetchall()
+            cands = [r for r in rows if r[2] == POINTCLOUD2 and (topic is None or r[1] == topic)]
+            if selected is None and cands:
+                selected = cands[0]
+            if selected is None:
+                continue
+            row = next((r for r in rows if r[1] == selected[1] and r[2] == POINTCLOUD2), None)
+            if row is None:
+                continue
+            cnt, t0, t1 = con.execute(
+                "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM messages WHERE topic_id=?", (row[0],)
+            ).fetchone()
+            count += cnt
+            if t0 is not None:
+                starts.append(t0); ends.append(t1)
+        finally:
+            con.close()
+    if selected is None:
+        raise ValueError(f"no PointCloud2 topic in {path}")
+    tid, tname, _ = selected
+    bag_dir = path.parent if path.suffix == ".db3" else path
     ident = bag_dir.relative_to(root).as_posix() if root and bag_dir.is_relative_to(root) else bag_dir.name
-    return BagInfo(ident, bag_dir.name, db, tname, int(tid), int(cnt or 0), int(t0 or 0), int(t1 or 0))
+    return BagInfo(ident, bag_dir.name, paths[0], tname, int(tid), int(count),
+                   int(min(starts)) if starts else 0, int(max(ends)) if ends else 0, paths)
 
 
 def discover_bags(root: str | Path) -> list[BagInfo]:
@@ -209,7 +301,7 @@ def discover_bags(root: str | Path) -> list[BagInfo]:
             continue
         seen.add(db.parent)
         try:
-            info = open_bag(db, root)
+            info = open_bag(db.parent, root)
         except (OSError, ValueError, sqlite3.Error):
             continue
         if info.frame_count:
@@ -222,9 +314,20 @@ class BagReader:
 
     def __init__(self, info: BagInfo):
         self.info = info
-        self._con = _connect(info.path)
-        self._ids = [r[0] for r in self._con.execute(
-            "SELECT id FROM messages WHERE topic_id=? ORDER BY timestamp, id", (info.topic_id,))]
+        self._cons = []
+        self._ids = []
+        try:
+            for source_index, path in enumerate(info.storage_paths or (info.path,)):
+                con = _connect(path)
+                self._cons.append(con)
+                rows = con.execute(
+                    "SELECT m.id, m.timestamp FROM messages m JOIN topics t ON t.id=m.topic_id "
+                    "WHERE t.name=? AND t.type=? ORDER BY m.timestamp,m.id", (info.topic, POINTCLOUD2))
+                self._ids.extend((int(ts), source_index, int(message_id)) for message_id, ts in rows)
+            self._ids.sort()
+        except Exception:
+            self.close()
+            raise
 
     def __len__(self) -> int:
         return len(self._ids)
@@ -232,8 +335,9 @@ class BagReader:
     def read(self, index: int) -> tuple[int, RawCloud]:
         if not 0 <= index < len(self._ids):
             raise IndexError(index)
-        ts, data = self._con.execute(
-            "SELECT timestamp, data FROM messages WHERE id=?", (self._ids[index],)).fetchone()
+        ts, source_index, message_id = self._ids[index]
+        (data,) = self._cons[source_index].execute(
+            "SELECT data FROM messages WHERE id=?", (message_id,)).fetchone()
         return int(ts), decode_pointcloud2(data)
 
     def iterate(self, start: int = 0, stop: int | None = None, step: int = 1) -> Iterator[tuple[int, int, RawCloud]]:
@@ -243,4 +347,5 @@ class BagReader:
             yield i, ts, cloud
 
     def close(self) -> None:
-        self._con.close()
+        for con in self._cons:
+            con.close()

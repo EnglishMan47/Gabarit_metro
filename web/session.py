@@ -28,7 +28,7 @@ def pack_frame(res: FrameResult, meta: dict[str, Any]) -> bytes:
     lev = res.lev
     labels = res.labels
     f = lev[:, 1]
-    keep = (f > -2) & (f < 205) & (lev[:, 2] > -1.5) & (lev[:, 2] < 7.0)
+    keep = (f > -2) & (f < meta.get("analysis_range_m", 200.0) + 5.0) & (lev[:, 2] > -1.5) & (lev[:, 2] < 7.0)
     c_at = np.interp(f, res.track.s, res.track.c)
     keep &= np.abs(lev[:, 0] - c_at) < 18
     # thin the dense near field, keep everything relevant for the decision
@@ -55,6 +55,9 @@ def pack_frame(res: FrameResult, meta: dict[str, Any]) -> bytes:
         "wl": [None if not math.isfinite(v) else round(float(v), 2) for v in tr.wall_left[::step]],
         "wr": [None if not math.isfinite(v) else round(float(v), 2) for v in tr.wall_right[::step]],
         "observed_until": round(tr.observed_until, 1),
+        "current_observed_until": round(tr.current_observed_until if tr.current_observed_until is not None
+                                        else tr.observed_until, 1),
+        "coasted_frames": tr.coast_frames,
         "rail_until": round(tr.rail_until, 1),
     }
     body = json.dumps(meta, ensure_ascii=False, default=_json_default).encode("utf-8")
@@ -101,7 +104,10 @@ class BagSession:
         return len(self.reader)
 
     def close(self) -> None:
-        self.reader.close()
+        # Cancelling an asyncio player does not cancel its worker thread.
+        # A bag switch must wait for the old frame before closing its SQLite DB.
+        with self.lock:
+            self.reader.close()
 
     def set_config(self, cfg: Config) -> None:
         with self.lock:
@@ -116,8 +122,11 @@ class BagSession:
         for i in range(start, index):
             ts, raw = self.reader.read(i)
             raw = self._inject(raw)
-            res = self.pipe.process_raw(raw, ts * 1e-9, frame_index=i)
-            self._advance(res.data["displacement_m"])
+            self.pipe.process_raw(raw, ts * 1e-9, frame_index=i)
+            # Reprocessing history calibrates the detector; it is not another
+            # playback movement. Only step() advances the virtual scene. Test
+            # objects remain at their displayed relative range after a seek
+            # or a configuration change.
         self.next_index = index
 
     def seek(self, index: int) -> None:
@@ -125,10 +134,10 @@ class BagSession:
             index = int(min(max(index, 0), self.frames - 1))
             self._warm(index)
 
-    def add_obstacle(self, shape: str, s: float, d: float) -> dict:
+    def add_obstacle(self, shape: str, s: float, d: float, yaw_deg: float = 0.0) -> dict:
         with self.lock:
             ob = SyntheticObstacle(shape=shape if shape in SHAPES else "person", s=float(s), d=float(d),
-                                   id=self.next_obstacle_id)
+                                   id=self.next_obstacle_id, yaw_deg=float(yaw_deg))
             self.next_obstacle_id += 1
             self.obstacles.append(WorldObstacle(ob, self.odometer + ob.s))
             return ob.public()
@@ -147,7 +156,8 @@ class BagSession:
         if not self.obstacles or self.pipe.track.prev is None or not self.pipe.track.calib.valid:
             return raw
         injected, _ = inject(raw, [w.ob for w in self.obstacles], self.pipe.track.prev, self.pipe.track.calib,
-                             self.cfg.sensor.forward_axis)
+                             self.cfg.sensor.forward_axis, up_axis=self.cfg.sensor.up_axis,
+                             scan_pattern=self.cfg.sensor.scan_pattern)
         return injected
 
     def step(self) -> tuple[bytes, dict] | None:
@@ -174,151 +184,6 @@ class BagSession:
             })
             self.last_meta = meta
             return pack_frame(res, meta), meta
-
-
-class BrakeSim:
-    """Emergency braking of the virtual train in the demo player.
-
-    The recording cannot be changed, but it can be replayed slower: every frame
-    moves the real train by ``dx``; the virtual train covers the same ``dx`` at
-    its own, decreasing speed, which gives the virtual time of the frame. The
-    player sleeps that long, so the scene visibly decelerates and stops exactly
-    where the braking train would stop (or at the obstacle, if it is too close).
-    """
-
-    def __init__(self, v0: float, obstacle_m: float, reaction_s: float, decel: float, margin_m: float = 1.0):
-        self.v0 = float(v0)
-        self.v = float(v0)
-        self.reaction_s = float(reaction_s)
-        self.decel = float(decel)
-        self.obstacle_m = float(obstacle_m)
-        self.reaction_m = self.v0 * self.reaction_s
-        self.stop_m = self.reaction_m + self.v0 * self.v0 / (2 * self.decel)
-        self.limit_m = max(self.obstacle_m - margin_m, 0.0)
-        self.collision = self.stop_m > self.limit_m
-        self.x = 0.0
-        self.t = 0.0
-        self.done = False
-
-    @property
-    def impact_kmh(self) -> float:
-        """Speed at the obstacle if the train cannot stop in time."""
-        if not self.collision:
-            return 0.0
-        d = self.limit_m - self.reaction_m
-        if d <= 0:
-            return self.v0 * 3.6
-        return math.sqrt(max(self.v0 * self.v0 - 2 * self.decel * d, 0.0)) * 3.6
-
-    def advance(self, dx: float) -> float:
-        """Move the virtual train by ``dx`` metres; returns the virtual time spent."""
-        if self.done:
-            return 0.0
-        dx = max(float(dx), 0.0)
-        if self.x + dx >= self.limit_m:           # reached the obstacle
-            dx = self.limit_m - self.x
-            self.done = True
-        dt = 0.0
-        if self.x < self.reaction_m:               # reaction: constant speed
-            step = min(dx, self.reaction_m - self.x)
-            dt += step / max(self.v, 1e-3)
-            self.x += step
-            dx -= step
-        if dx > 0:                                 # braking: v^2 = v0^2 - 2 a s
-            v2 = self.v * self.v - 2 * self.decel * dx
-            v_new = math.sqrt(v2) if v2 > 0 else 0.0
-            dt += (self.v - v_new) / self.decel
-            self.x += dx if v2 > 0 else self.v * self.v / (2 * self.decel)
-            self.v = v_new
-            if v_new == 0.0:
-                self.done = True
-        self.t += dt
-        return dt
-
-    def public(self) -> dict:
-        return {
-            "active": not self.done, "stopped": self.done and not self.collision,
-            "collision": self.collision, "v_kmh": round(self.v * 3.6, 1), "v0_kmh": round(self.v0 * 3.6, 1),
-            "travelled_m": round(self.x, 1), "stop_m": round(self.stop_m, 1),
-            "obstacle_m": round(self.obstacle_m, 1),
-            "gap_m": round(max(self.obstacle_m - self.stop_m, 0.0), 1),
-            "impact_kmh": round(self.impact_kmh, 1), "time_s": round(self.t, 1),
-        }
-
-
-class BrakeGuard:
-    """Safety logic around emergency braking (independent of the operator).
-
-    * A confirmed obstacle starts braking automatically; operator verdicts only
-      go to the journal.
-    * After the stop the train is held while the obstacle is on the track. It
-      moves on by itself once the track has been clear for ``clear_frames``
-      frames in a row.
-    * Only an explicit operator override ("continue: the object is not an
-      obstacle") releases a held train; the objects of that stop are then
-      exempt. Any other obstacle brakes the train again.
-    """
-
-    def __init__(self, clear_frames: int = 3):
-        self.clear_frames = clear_frames
-        self.brake: BrakeSim | None = None
-        self.holding = False
-        self.hold_ids: set[int] = set()
-        self.exempt: set[int] = set()
-        self.clear_count = 0
-        self.last_release = ""   # "auto" / "override" - shown once after a release
-
-    def threat(self, meta: dict) -> set[int]:
-        return {o["track_id"] for o in meta.get("obstacles", [])} - self.exempt
-
-    def reset(self, forget_exempt: bool = True) -> None:
-        self.brake, self.holding, self.hold_ids, self.clear_count = None, False, set(), 0
-        if forget_exempt:
-            self.exempt = set()
-
-    def start(self, meta: dict, reaction_s: float, decel: float) -> BrakeSim | None:
-        """Begin braking on a new obstacle (None if nothing to do)."""
-        if self.brake is not None or meta.get("status") != "OBSTACLE":
-            return None
-        ids = self.threat(meta)
-        v = meta.get("speed_mps") or 0.0
-        dist = meta.get("nearest_track_distance_m") or meta.get("nearest_distance_m")
-        if not ids or v < 1.0 or not dist:
-            return None
-        self.brake = BrakeSim(v, dist, reaction_s, decel)
-        self.hold_ids = set(ids)
-        self.last_release = ""
-        return self.brake
-
-    def hold(self, meta: dict) -> None:
-        """The virtual train has stopped: keep it standing."""
-        self.holding = True
-        self.hold_ids |= self.threat(meta)
-        self.clear_count = 0
-
-    def check_clear(self, meta: dict) -> bool:
-        """While holding: True (and released) once the track is clear."""
-        if not self.holding:
-            return False
-        self.clear_count = self.clear_count + 1 if not self.threat(meta) else 0
-        if self.clear_count >= self.clear_frames:
-            self.reset(forget_exempt=False)
-            self.last_release = "auto"
-            return True
-        return False
-
-    def override(self, meta: dict | None = None) -> set[int]:
-        """Operator decision: the held-for objects are not obstacles."""
-        ids = set(self.hold_ids) | (self.threat(meta) if meta else set())
-        self.exempt |= ids
-        self.reset(forget_exempt=False)
-        self.last_release = "override"
-        return ids
-
-    def public(self) -> dict:
-        out = self.brake.public() if self.brake is not None else {"active": False, "stopped": False}
-        out.update({"holding": self.holding, "hold_ids": sorted(self.hold_ids), "released": self.last_release})
-        return out
 
 
 def scan_bag(info: BagInfo, cfg: Config, progress=None, stop_flag=None) -> list[dict]:

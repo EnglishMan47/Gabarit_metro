@@ -59,15 +59,6 @@
       <span><i style="background:var(--bad)"></i>препятствие</span>
       <span><i style="background:var(--synth)"></i>испытательный объект</span>
     </div>
-    <div class="toast hidden" id="toast">
-      <div class="toast-title">Обнаружено препятствие</div>
-      <div class="toast-body" id="toastBody"></div>
-      <div class="toast-actions">
-        <button class="ok" id="toastConfirm">Подтвердить</button>
-        <button class="no" id="toastReject">Ложная тревога</button>
-        <button class="later" id="toastLater">Позже</button>
-      </div>
-    </div>
     <canvas id="radar" class="radar" title="Схема пути: 0–200 м"></canvas>
   </section>
 
@@ -77,23 +68,11 @@
       <div class="status-main" id="statusMain">—</div>
       <div class="status-sub" id="statusSub">выберите запись и нажмите ▶</div>
       <div class="status-note hidden" id="statusNote"></div>
-      <div class="hold-box hidden" id="holdBox">
-        <div id="holdText"></div>
-        <button class="resume" id="btnResume">Продолжить движение…</button>
-      </div>
-    </div>
-    <div class="brake-mode" title="Режим торможения поезда при подтверждённом препятствии">
-      <span>Торможение</span>
-      <div class="seg">
-        <button id="bmAuto" class="on">Автоматическое</button>
-        <button id="bmOff">Выключено</button>
-      </div>
-      <span class="bm-note hidden" id="bmNote">только просмотр записи — поезд не остановится</span>
     </div>
     <div class="metrics">
       <div class="metric"><span class="m-val" id="mSpeed">—</span><span class="m-lab">скорость, км/ч</span></div>
       <div class="metric"><span class="m-val" id="mFree">—</span><span class="m-lab">свободно, м</span></div>
-      <div class="metric"><span class="m-val" id="mStop">—</span><span class="m-lab">тормозной путь, м</span></div>
+      <div class="metric"><span class="m-val" id="mEnvelope">—</span><span class="m-lab">габарит, м</span></div>
       <div class="metric"><span class="m-val" id="mTtc">—</span><span class="m-lab">до препятствия, с</span></div>
     </div>
 
@@ -104,7 +83,6 @@
       <button data-tab="layers">Вид</button>
       <button data-tab="params">Детектор</button>
       <button data-tab="perf">Скорость</button>
-      <button data-tab="log">Журнал</button>
     </nav>
 
     <div class="tab" id="tab-test">
@@ -112,6 +90,8 @@
       <label>Объект
         <select id="synShape">
           <option value="person">Человек (1,75 м)</option>
+          <option value="person_sitting">Человек сидя (геометрический макет)</option>
+          <option value="person_lying">Человек лёжа (геометрический макет)</option>
           <option value="child">Ребёнок (1,2 м)</option>
           <option value="box_50cm">Ящик 0,5×0,5×0,5 м</option>
           <option value="box_30cm">Предмет 0,3×0,3×0,1 м на рельсе</option>
@@ -126,6 +106,9 @@
       </label>
       <label>Смещение от оси: <b id="synLatVal">0.0</b> м
         <input type="range" id="synLat" min="-1.5" max="1.5" value="0" step="0.1">
+      </label>
+      <label>Поворот объекта: <b id="synYawVal">0</b>°
+        <input type="range" id="synYaw" min="-90" max="90" value="0" step="15">
       </label>
       <div class="row">
         <button class="primary" id="synAdd">Поставить объект</button>
@@ -155,6 +138,10 @@
 
     <div class="tab hidden" id="tab-params">
       <p class="hint">Параметры применяются к текущему проезду сразу (детектор перезапускается с прогревом).</p>
+      <label>Лидар и оси облака
+        <select id="sensorProfile"><option value="current">Из конфигурации запуска</option></select>
+      </label>
+      <p class="hint">Выберите оси, которые записаны в bag: драйвер Falcon может уже преобразовать их в ROS. В режиме LIVE профиль меняется в ROS-консоли.</p>
       <label>Режим
         <select id="preset">
           <option value="balanced" selected>Сбалансированный</option>
@@ -162,14 +149,14 @@
           <option value="sensitive">Чувствительный — раннее обнаружение</option>
         </select>
       </label>
-      <label>Ширина габарита: <b id="pWidthVal">2.2</b> м
-        <input type="range" id="pWidth" min="1.8" max="3.2" step="0.1" value="2.2"></label>
+      <label>Ширина габарита: <b id="pWidthVal">2.1</b> м
+        <input type="range" id="pWidth" min="1.8" max="3.2" step="0.1" value="2.1"></label>
       <label>Высота габарита: <b id="pHeightVal">3.0</b> м
         <input type="range" id="pHeight" min="2.0" max="4.0" step="0.1" value="3.0"></label>
       <label>Нижняя граница над головкой рельса: <b id="pMinHVal">0.12</b> м
         <input type="range" id="pMinH" min="0.05" max="0.4" step="0.01" value="0.12"></label>
       <label>Предел анализа: <b id="pRangeVal">200</b> м
-        <input type="range" id="pRange" min="60" max="200" step="10" value="200"></label>
+        <input type="range" id="pRange" min="60" max="400" step="10" value="200"></label>
       <div class="row"><button class="primary" id="pApply">Применить</button><button id="pReset">Сбросить</button></div>
       <div class="calib" id="calibBox"></div>
     </div>
@@ -177,13 +164,9 @@
     <div class="tab hidden" id="tab-perf">
       <div class="perf" id="perfBars"></div>
       <canvas id="perfChart" class="perfchart"></canvas>
-      <p class="hint">Время по этапам одного кадра на сервере: декодирование PointCloud2, самокалибровка и оценка пути, эго-движение, поиск кандидатов, подтверждение треков. Цель — не более 100 мс (поток лидара 10 Гц).</p>
+      <p class="hint">Время по этапам одного кадра на сервере: преобразование облака, самокалибровка и путь, эго-движение, фильтр изолированных возвратов, поиск кандидатов и подтверждение. Цель — не более 100 мс (10 Гц). Чтение записи и вывод графики измеряются отдельно.</p>
     </div>
 
-    <div class="tab hidden" id="tab-log">
-      <div class="row"><button id="logRefresh">Обновить</button><a class="btn" href="/api/journal.csv" download>Экспорт CSV</a></div>
-      <div class="journal" id="journal"></div>
-    </div>
   </aside>
 </main>
 

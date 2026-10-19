@@ -10,7 +10,11 @@ Published:
   /gabarit/status              std_msgs/String    full JSON result of the frame
   /gabarit/markers             visualization_msgs/MarkerArray  envelope, path, obstacle boxes (RViz2)
   /gabarit/obstacle_points     sensor_msgs/PointCloud2  points of confirmed obstacles
-All outputs are in the lidar frame of the input message.
+  /gabarit/view_cloud          sensor_msgs/PointCloud2  levelled working cloud for RViz
+  /gabarit/view_markers        visualization_msgs/MarkerArray  levelled RViz overlays
+  /gabarit/reset               std_srvs/Trigger  reset temporal state and reload config parameter
+Decision outputs retain the input sensor frame. view_* share gabarit_view,
+with REP-103 x forward, y left, z up and the rail head plane at z=0.
 """
 
 from __future__ import annotations
@@ -18,38 +22,84 @@ from __future__ import annotations
 import gabarit  # noqa: F401  (single-threaded BLAS before NumPy is loaded)
 
 import json
+import array
 import math
+import struct
 import threading
 import time
 
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.clock import Clock, ClockType
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from sensor_msgs.msg import PointCloud2, PointField
+from builtin_interfaces.msg import Time
 from std_msgs.msg import Bool, Float32, String, Header
+from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
 
 from gabarit.config import Config
+from gabarit.cloud import axis_transform
 from gabarit.pipeline import Pipeline
-from gabarit.rosbag import RawCloud
-
-_ROS_TYPES = {1: "i1", 2: "u1", 3: "i2", 4: "u2", 5: "i4", 6: "u4", 7: "f4", 8: "f8"}
+from gabarit.rosbag import RawCloud, pointcloud2_array, decode_pointcloud2
 
 
 def msg_to_raw(msg: PointCloud2) -> RawCloud:
-    order = ">" if msg.is_bigendian else "<"
-    dtype = np.dtype({
-        "names": [f.name for f in msg.fields],
-        "formats": [order + _ROS_TYPES[f.datatype] for f in msg.fields],
-        "offsets": [f.offset for f in msg.fields],
-        "itemsize": msg.point_step,
-    })
-    n = msg.width * msg.height
-    arr = np.frombuffer(bytes(msg.data), dtype=dtype, count=n)
+    fields = [(field.name, field.offset, field.datatype, field.count) for field in msg.fields]
+    arr = pointcloud2_array(bytes(msg.data), fields, msg.height, msg.width,
+                            msg.point_step, msg.row_step, msg.is_bigendian)
     stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
     return RawCloud(stamp, msg.header.frame_id, msg.height, msg.width, arr)
+
+
+def input_to_raw(msg):
+    if isinstance(msg, (bytes, bytearray, memoryview)):
+        raw = decode_pointcloud2(msg)
+        endian = "<" if msg[:2] == b"\x00\x01" else ">"
+        sec, nsec = struct.unpack_from(endian + "iI", msg, 4)
+        header = Header(stamp=Time(sec=sec, nanosec=nsec), frame_id=raw.frame_id)
+        return raw, header
+    return msg_to_raw(msg), msg.header
+
+
+def xyz_cloud_cdr(header, pts, intensity=None) -> bytes:
+    """Serialize the viewer cloud directly, avoiding per-byte Python/C conversion."""
+    if intensity is not None:
+        pts = np.column_stack((pts, intensity))
+    pts = np.ascontiguousarray(pts, dtype="<f4")
+    names = ("x", "y", "z", "intensity") if intensity is not None else ("x", "y", "z")
+    out = bytearray(b"\x00\x01\x00\x00")
+    def u32(value):
+        out.extend(b"\x00" * ((-(len(out) - 4)) % 4))
+        out.extend(struct.pack("<I", value))
+    def string(value):
+        data = value.encode("utf-8") + b"\x00"
+        u32(len(data)); out.extend(data)
+    out.extend(struct.pack("<iI", header.stamp.sec, header.stamp.nanosec))
+    string(header.frame_id)
+    u32(1); u32(len(pts)); u32(len(names))
+    for index, name in enumerate(names):
+        string(name); u32(index * 4); out.append(7); u32(1)
+    out.append(0)
+    step = len(names) * 4
+    u32(step); u32(len(pts) * step)
+    data = pts.tobytes()
+    u32(len(data)); out.extend(data); out.append(1)
+    return bytes(out)
+
+
+def view_indices(labels, limit=30000):
+    """Bound background traffic to RViz while retaining all obstacle evidence."""
+    if len(labels) <= limit:
+        return np.arange(len(labels))
+    important = np.flatnonzero(labels >= 3)
+    background = np.flatnonzero(labels < 3)
+    take = max(limit - len(important), 0)
+    selected = (background[np.linspace(0, len(background) - 1, take).astype(np.int64)]
+                if take and len(background) else background[:0])
+    return np.concatenate((selected, important))
 
 
 class GabaritNode(Node):
@@ -62,12 +112,14 @@ class GabaritNode(Node):
         self.declare_parameter("publish_markers", True)
         cfg_path = self.get_parameter("config").value
         self.cfg = Config.load(cfg_path) if cfg_path else Config()
+        self.sensor_axes = axis_transform(self.cfg.sensor.forward_axis, self.cfg.sensor.up_axis)
         self.pipe = Pipeline(self.cfg)
         self.lock = threading.Lock()
         self.busy = False
         self.dropped = 0
         self.processed = 0
         self.lat_hist: list[float] = []
+        self._last_marker_counts: dict[str, int] = {}
 
         out_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST,
                              durability=DurabilityPolicy.VOLATILE)
@@ -77,36 +129,104 @@ class GabaritNode(Node):
         self.pub_status = self.create_publisher(String, "/gabarit/status", out_qos)
         self.pub_markers = self.create_publisher(MarkerArray, "/gabarit/markers", out_qos)
         self.pub_points = self.create_publisher(PointCloud2, "/gabarit/obstacle_points", out_qos)
+        self.pub_view_cloud = self.create_publisher(PointCloud2, "/gabarit/view_cloud", self._view_qos())
+        self.pub_view_markers = self.create_publisher(MarkerArray, "/gabarit/view_markers", out_qos)
+        self.create_service(Trigger, "~/reset", self._reset)
 
-        # reliable + keep-last-1: huge clouds are not fragmented away, and a slow
-        # frame is replaced by the newest one instead of building a queue
+        # Prefer reliable for large clouds when offered; a best-effort bag must
+        # not be silently rejected by a reliable-only subscription.
         self.declare_parameter("reliable", True)
-        rel = ReliabilityPolicy.RELIABLE if self.get_parameter("reliable").value else ReliabilityPolicy.BEST_EFFORT
-        self.in_qos = QoSProfile(depth=1, reliability=rel, history=HistoryPolicy.KEEP_LAST)
+        self.declare_parameter("input_qos", "auto")
+        if self.get_parameter("input_qos").value not in ("auto", "reliable", "best_effort"):
+            raise ValueError("input_qos must be auto, reliable, or best_effort")
         self.subs = {}
+        self._subscription_reliability = {}
         topic = self.get_parameter("input_topic").value
         if topic and topic != "auto":
             self._subscribe(topic)
-        else:
-            self.create_timer(1.0, self._discover)
+        # Discovery and QoS changes must work while sim time is paused.
+        self.create_timer(0.25, self._discover, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.hub = None
+        self.web_app = None
         if self.get_parameter("web").value:
             self._start_web(int(self.get_parameter("web_port").value))
-        self.create_timer(5.0, self._report)
+        self.create_timer(5.0, self._report, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.get_logger().info("gabarit node ready (input: %s)" % topic)
 
     # ---------------------------------------------------------------- inputs
+    @staticmethod
+    def _view_qos():
+        return QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
+                          history=HistoryPolicy.KEEP_LAST)
+
+    def _reset(self, request, response):
+        try:
+            path = self.get_parameter("config").value
+            cfg = Config.load(path) if path else Config()
+            pipeline = Pipeline(cfg)
+            sensor_axes = axis_transform(cfg.sensor.forward_axis, cfg.sensor.up_axis)
+            with self.lock:
+                self.cfg, self.pipe = cfg, pipeline
+                self.sensor_axes = sensor_axes
+                self.processed = self.dropped = 0
+                self.lat_hist.clear()
+                self._last_marker_counts.clear()
+            for publisher in (self.pub_markers, self.pub_view_markers):
+                publisher.publish(MarkerArray(markers=[Marker(action=Marker.DELETEALL)]))
+            self.pub_obst.publish(Bool(data=False))
+            self.pub_dist.publish(Float32(data=math.nan))
+            self.pub_free.publish(Float32(data=0.0))
+            if self.web_app is not None:
+                self.web_app.base_cfg = cfg
+            if self.hub is not None:
+                self.hub.last = None
+            self._discover()
+            response.success = True
+            response.message = f"pipeline reset; config: {path or 'defaults'}"
+            self.get_logger().info(response.message)
+        except Exception as error:
+            response.success = False
+            response.message = f"reset failed; previous pipeline retained: {error}"
+        return response
+
     def _discover(self) -> None:
+        topic = self.get_parameter("input_topic").value
+        if topic and topic != "auto":
+            self._subscribe(topic)
+            return
         for name, types in self.get_topic_names_and_types():
-            if "sensor_msgs/msg/PointCloud2" in types and name not in self.subs and not name.startswith("/gabarit"):
+            if "sensor_msgs/msg/PointCloud2" in types and not name.startswith("/gabarit"):
                 self._subscribe(name)
 
-    def _subscribe(self, name: str) -> None:
-        self.subs[name] = self.create_subscription(PointCloud2, name, self._on_cloud, self.in_qos)
-        self.get_logger().info(f"subscribed to {name}")
+    def _input_reliability(self, name: str):
+        mode = self.get_parameter("input_qos").value
+        if mode == "reliable":
+            return ReliabilityPolicy.RELIABLE
+        if mode == "best_effort" or not self.get_parameter("reliable").value:
+            return ReliabilityPolicy.BEST_EFFORT
+        endpoints = self.get_publishers_info_by_topic(name)
+        if not endpoints:
+            return self._subscription_reliability.get(name, ReliabilityPolicy.BEST_EFFORT)
+        if all(info.qos_profile.reliability == ReliabilityPolicy.RELIABLE for info in endpoints):
+            return ReliabilityPolicy.RELIABLE
+        return ReliabilityPolicy.BEST_EFFORT
 
-    def _on_cloud(self, msg: PointCloud2) -> None:
-        # the subscription keeps only the newest frames (depth 2): when the
+    def _subscribe(self, name: str) -> None:
+        reliability = self._input_reliability(name)
+        if name in self.subs:
+            if self._subscription_reliability[name] == reliability:
+                return
+            self.destroy_subscription(self.subs.pop(name))
+        qos = QoSProfile(depth=1, reliability=reliability, history=HistoryPolicy.KEEP_LAST)
+        # A generated Python PointCloud2 conversion walks the large byte
+        # sequence before entering the callback. Decode CDR directly instead.
+        self.subs[name] = self.create_subscription(PointCloud2, name, lambda msg: self._on_cloud(msg, name),
+                                                    qos, raw=True)
+        self._subscription_reliability[name] = reliability
+        self.get_logger().info(f"subscribed to {name} ({reliability.name}, depth=1)")
+
+    def _on_cloud(self, msg: PointCloud2, topic: str = "") -> None:
+        # the subscription keeps only the newest frame (depth 1): when the
         # detector is slower than the sensor, stale clouds are skipped
         if self.busy:
             self.dropped += 1
@@ -114,21 +234,33 @@ class GabaritNode(Node):
         self.busy = True
         try:
             t0 = time.perf_counter()
-            raw = msg_to_raw(msg)
+            raw, header = input_to_raw(msg)
+            t_input = time.perf_counter()
             with self.lock:
                 res = self.pipe.process_raw(raw, raw.stamp)
             self.processed += 1
+            t_core = time.perf_counter()
             d = res.data
-            d["input_topic"] = msg.header.frame_id
+            d["input_topic"] = topic
+            d["input_frame"] = header.frame_id
             d["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-            self.lat_hist.append(d["latency_ms"])
-            del self.lat_hist[:-200]
-            self._publish(msg.header, res)
+            self._publish(header, res)
+            t_outputs = time.perf_counter()
             if self.hub is not None:
                 from web.session import pack_frame
                 meta = dict(d)
                 meta.update({"type": "frame", "bag": "ROS 2", "synthetic": []})
                 self.hub.publish_threadsafe(pack_frame(res, meta))
+            end = time.perf_counter()
+            d["latency_ms"] = round((end - t0) * 1000, 2)
+            d["ros_timing_ms"] = {"input_decode": round((t_input - t0) * 1000, 2),
+                                  "pipeline": round((t_core - t_input) * 1000, 2),
+                                  "outputs": round((t_outputs - t_core) * 1000, 2),
+                                  "web_pack": round((end - t_outputs) * 1000, 2),
+                                  "total": d["latency_ms"]}
+            self.lat_hist.append(d["latency_ms"])
+            del self.lat_hist[:-200]
+            self.pub_status.publish(String(data=json.dumps(d, ensure_ascii=False, default=float)))
         except Exception as err:  # pragma: no cover - keep the node alive
             self.get_logger().error(f"frame failed: {err}")
         finally:
@@ -140,12 +272,21 @@ class GabaritNode(Node):
         self.pub_obst.publish(Bool(data=bool(d["obstacle"])))
         self.pub_dist.publish(Float32(data=float(d["nearest_distance_m"]) if d["nearest_distance_m"] is not None else math.nan))
         self.pub_free.publish(Float32(data=float(d["free_distance_m"])))
-        self.pub_status.publish(String(data=json.dumps(d, ensure_ascii=False, default=float)))
-        if self.get_parameter("publish_markers").value:
+        if self.get_parameter("publish_markers").value and self.pub_markers.get_subscription_count():
             self.pub_markers.publish(self._markers(header, res))
-        idx = np.flatnonzero(res.labels == 4)
-        if len(idx):
+        if self.pub_points.get_subscription_count():
+            idx = np.flatnonzero(res.labels == 4)
             self.pub_points.publish(self._cloud(header, res.cloud.xyz[idx]))
+        # The viewer uses one frame for every lidar: REP-103 x=forward,
+        # y=left, z=up, with the rail plane at z=0. Raw-frame outputs above
+        # retain their original frame_id for ROS consumers.
+        view_header = Header(stamp=header.stamp, frame_id="gabarit_view")
+        if self.get_parameter("publish_markers").value and self.pub_view_markers.get_subscription_count():
+            self.pub_view_markers.publish(self._markers(view_header, res, view=True))
+        if self.pub_view_cloud.get_subscription_count():
+            view_idx = view_indices(res.labels)
+            points = res.lev[view_idx][:, [1, 0, 2]]
+            self.pub_view_cloud.publish(xyz_cloud_cdr(view_header, points, res.cloud.intensity[view_idx]))
         if d["obstacle"]:
             self.get_logger().warn(f"OBSTACLE {d['nearest_distance_m']:.1f} m ahead", throttle_duration_sec=1.0)
 
@@ -158,62 +299,70 @@ class GabaritNode(Node):
         z1 = lat * math.sin(b) + z2 * math.cos(b)
         f = fwd * math.cos(a) - z1 * math.sin(a)
         z = fwd * math.sin(a) + z1 * math.cos(a)
-        axis = self.cfg.sensor.forward_axis
-        if axis == "-y":
-            return Point(x=float(x), y=float(-f), z=float(z))
-        if axis == "+y":
-            return Point(x=float(-x), y=float(f), z=float(z))
-        if axis == "-x":
-            return Point(x=float(-f), y=float(-x), z=float(z))
-        return Point(x=float(f), y=float(x), z=float(z))
+        point = np.array([x, f, z]) @ self.sensor_axes
+        return Point(x=float(point[0]), y=float(point[1]), z=float(point[2]))
 
-    def _markers(self, header: Header, res) -> MarkerArray:
+    def _markers(self, header: Header, res, view: bool = False) -> MarkerArray:
         arr = MarkerArray()
+        point = (lambda lat, fwd, up: Point(x=float(fwd), y=float(lat), z=float(up))) if view else (
+            lambda lat, fwd, up: self._to_sensor(lat, fwd, up, res))
         tr = res.track
         d = res.data
         W, H = self.cfg.envelope.width, self.cfg.envelope.height
         color = (0.94, 0.27, 0.27) if d["obstacle"] else (0.13, 0.77, 0.37)
         env = Marker(header=header, ns="envelope", id=0, type=Marker.LINE_LIST, action=Marker.ADD)
+        env.pose.orientation.w = 1.0
         env.scale.x = 0.05
         env.color.r, env.color.g, env.color.b, env.color.a = (*color, 0.9)
-        s_end = min(tr.observed_until, 200.0)
+        s_end = min(tr.observed_until, self.cfg.detection.max_range, self.cfg.track.horizon)
         ss = np.arange(3.0, max(s_end, 4.0), 2.0)
         cs = np.interp(ss, tr.s, tr.c)
         zs = np.interp(ss, tr.s, tr.z)
         for k in range(len(ss) - 1):
             for lat, up in ((W / 2, 0), (-W / 2, 0), (W / 2, H), (-W / 2, H)):
-                env.points.append(self._to_sensor(cs[k] + lat, ss[k], zs[k] + up, res))
-                env.points.append(self._to_sensor(cs[k + 1] + lat, ss[k + 1], zs[k + 1] + up, res))
+                env.points.append(point(cs[k] + lat, ss[k], zs[k] + up))
+                env.points.append(point(cs[k + 1] + lat, ss[k + 1], zs[k + 1] + up))
         for k in range(0, len(ss), 12):
             ring = [(W / 2, 0), (W / 2, H), (-W / 2, H), (-W / 2, 0), (W / 2, 0)]
             for (l0, u0), (l1, u1) in zip(ring[:-1], ring[1:]):
-                env.points.append(self._to_sensor(cs[k] + l0, ss[k], zs[k] + u0, res))
-                env.points.append(self._to_sensor(cs[k] + l1, ss[k], zs[k] + u1, res))
+                env.points.append(point(cs[k] + l0, ss[k], zs[k] + u0))
+                env.points.append(point(cs[k] + l1, ss[k], zs[k] + u1))
         arr.markers.append(env)
         path = Marker(header=header, ns="path", id=1, type=Marker.LINE_STRIP, action=Marker.ADD)
+        path.pose.orientation.w = 1.0
         path.scale.x = 0.04
         path.color.r, path.color.g, path.color.b, path.color.a = 0.22, 0.74, 0.97, 1.0
         for s, c, z in zip(ss, cs, zs):
-            path.points.append(self._to_sensor(c, s, z, res))
+            path.points.append(point(c, s, z))
         arr.markers.append(path)
-        clear = Marker(header=header, ns="obstacles", action=Marker.DELETEALL)
-        arr.markers.append(clear)
-        for k, ob in enumerate(d["obstacles"] + d["pending"]):
+        obstacles = d["obstacles"] + d["pending"]
+        # Delete only obsolete IDs; DELETEALL here also deleted the envelope
+        # just added earlier in the array and made it flicker/disappear in RViz.
+        key = "view" if view else "raw"
+        for k in range(len(obstacles), self._last_marker_counts.get(key, 0)):
+            for marker_id in (100 + k, 200 + k):
+                arr.markers.append(Marker(header=header, ns="obstacles", id=marker_id, action=Marker.DELETE))
+        self._last_marker_counts[key] = len(obstacles)
+        for k, ob in enumerate(obstacles):
             b = ob["box"]
             s0, s1 = b["s"][0], max(b["s"][1], b["s"][0] + 0.3)
             c = float(np.interp(s0, tr.s, tr.c))
             z = float(np.interp(s0, tr.s, tr.z))
-            m = Marker(header=header, ns="obstacles", id=100 + k, type=Marker.CUBE, action=Marker.ADD)
-            m.pose.position = self._to_sensor(c + 0.5 * (b["d"][0] + b["d"][1]), 0.5 * (s0 + s1), z + 0.5 * (b["h"][0] + b["h"][1]), res)
+            m = Marker(header=header, ns="obstacles", id=100 + k, type=Marker.LINE_LIST, action=Marker.ADD)
             m.pose.orientation.w = 1.0
-            m.scale.x = max(b["d"][1] - b["d"][0], 0.2) + 0.2
-            m.scale.y = s1 - s0 + 0.2
-            m.scale.z = max(b["h"][1] - b["h"][0], 0.2) + 0.2
+            m.scale.x = 0.08
+            # Explicit corner transforms keep the box aligned for all sensor
+            # axis conventions and calibrated pitch/roll, including Falcon.
+            corners = [(c + lat, forward, z + height)
+                       for forward in (s0, s1) for lat in b["d"] for height in b["h"]]
+            for i, j in ((0, 1), (0, 2), (0, 4), (1, 3), (1, 5), (2, 3),
+                         (2, 6), (3, 7), (4, 5), (4, 6), (5, 7), (6, 7)):
+                m.points.extend((point(*corners[i]), point(*corners[j])))
             conf = ob.get("confirmed", False)
             m.color.r, m.color.g, m.color.b, m.color.a = (0.94, 0.27, 0.27, 0.6) if conf else (0.96, 0.62, 0.04, 0.5)
             arr.markers.append(m)
             t = Marker(header=header, ns="obstacles", id=200 + k, type=Marker.TEXT_VIEW_FACING, action=Marker.ADD)
-            t.pose.position = self._to_sensor(c, s0, z + b["h"][1] + 1.0, res)
+            t.pose.position = point(c, s0, z + b["h"][1] + 1.0)
             t.pose.orientation.w = 1.0
             t.scale.z = 1.2
             t.color.r = t.color.g = t.color.b = t.color.a = 1.0
@@ -223,21 +372,23 @@ class GabaritNode(Node):
 
     def _cloud(self, header: Header, xyz: np.ndarray) -> PointCloud2:
         """Sensor working frame (lateral, forward, up) -> axes of the input cloud."""
-        lat, fwd, up = xyz[:, 0], xyz[:, 1], xyz[:, 2]
-        axis = self.cfg.sensor.forward_axis
-        if axis == "-y":
-            pts = np.column_stack((lat, -fwd, up))
-        elif axis == "+y":
-            pts = np.column_stack((-lat, fwd, up))
-        elif axis == "-x":
-            pts = np.column_stack((-fwd, -lat, up))
-        else:
-            pts = np.column_stack((fwd, lat, up))
-        pts = pts.astype(np.float32)
+        pts = xyz @ self.sensor_axes
+        return self._xyz_cloud(header, pts)
+
+    @staticmethod
+    def _xyz_cloud(header: Header, pts: np.ndarray, intensity=None) -> PointCloud2:
+        if intensity is not None:
+            pts = np.column_stack((pts, intensity))
+        pts = np.ascontiguousarray(pts, dtype=np.float32)
+        step = 4 * pts.shape[1]
         msg = PointCloud2(header=header, height=1, width=len(pts), is_bigendian=False, point_step=12,
-                          row_step=12 * len(pts), is_dense=True)
-        msg.fields = [PointField(name=n, offset=4 * i, datatype=PointField.FLOAT32, count=1) for i, n in enumerate("xyz")]
-        msg.data = pts.tobytes()
+                          row_step=step * len(pts), is_dense=True)
+        msg.point_step = step
+        names = ["x", "y", "z", "intensity"] if intensity is not None else ["x", "y", "z"]
+        msg.fields = [PointField(name=n, offset=4 * i, datatype=PointField.FLOAT32, count=1) for i, n in enumerate(names)]
+        # The generated Humble setter validates every element of bytes twice
+        # in Python. A typed uint8 buffer takes its constant-time fast path.
+        msg.data = array.array("B", pts.tobytes())
         return msg
 
     def _report(self) -> None:
@@ -245,6 +396,7 @@ class GabaritNode(Node):
             a = np.array(self.lat_hist)
             self.get_logger().info(f"frames {self.processed}, dropped {self.dropped}, latency p50 {np.percentile(a, 50):.1f} ms, "
                                    f"p95 {np.percentile(a, 95):.1f} ms")
+
 
     # ---------------------------------------------------------------- web
     def _start_web(self, port: int) -> None:
@@ -256,6 +408,8 @@ class GabaritNode(Node):
             self.get_logger().warn(f"web interface disabled: {err}")
             return
         app = App(None, None, live=True)
+        app.base_cfg = self.cfg
+        self.web_app = app
         self.hub = app.live
 
         def run() -> None:

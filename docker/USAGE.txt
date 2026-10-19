@@ -1,10 +1,32 @@
 Gabarit container commands (docker run ... gabarit <command>):
+  workspace         persistent ROS detector + RViz browser desktop on localhost:6080
+                    GUI: /vnc.html?autoconnect=1&resize=scale ; web UI on :8080
+  bag list          list recordings mounted under /data
+  bag play BAG      stop previous recording, reset detector, start BAG
+                    options: --rate 0.25 --paused --cache --config /opt/gabarit/config/PROFILE.yaml
+                    extra ros2 options follow -- (e.g. -- --loop)
+  bag switch BAG    same as bag play; container and RViz remain running
+  bag pause/resume  pause or resume the active player
+  bag next          play one ROS message while paused
+  bag rate 0.25     change speed during playback
+  bag stop          stop player process group
+  bag status/log    current player status / last player console output
+  shell             interactive shell with ROS and the workspace sourced
+  rviz              open RViz (requires DISPLAY, supplied in workspace)
   detect            ROS 2 node, subscribes to every PointCloud2 topic, publishes /gabarit/*,
-                    live web UI on http://localhost:8080 (default command)
-  demo [bag]        detect + `ros2 bag play <bag>` in one container
+                    live web UI on http://localhost:8080
+  demo BAG          workspace + an initial recording; container stays alive at EOF
   play <bag>        only `ros2 bag play`
   web               playback web UI without ROS on http://localhost:8000 (seek, synthetic obstacles)
   evaluate          run the detector over all bags in /data, results to /output/eval
   synthetic         detection range with ray-cast synthetic obstacles, results to /output/synthetic
   test              unit tests
 Data: mount the directory with bags to /data, results: mount a directory to /output.
+
+Setup and profiles: docs/INSTALLATION.md, docs/DOCKER_GUI.md in the repository.
+Rebuild after source updates: docker compose up -d --build
+Pandar/new_data/synthetic_*: --config /opt/gabarit/config/gabarit.yaml
+falcon_test_second_dark: --config /opt/gabarit/config/falcon_prime_ros.yaml
+Pass the target profile explicitly when switching between sensors.
+MarkerArray labels are for review only; detection consumes PointCloud2.
+Cache default budget is 16 GB; the 84 GB new_data bag should run without --cache.

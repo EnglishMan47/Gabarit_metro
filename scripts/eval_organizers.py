@@ -66,15 +66,12 @@ def main() -> int:
     for i in range(n):
         ts, raw = reader.read(i)
         gt_raw = synthetic_mask(raw)
-        cloud = from_raw(raw, cfg.sensor.forward_axis, cfg.sensor.min_range)
-        a = raw.points
-        x, y, z = (np.asarray(a[k], np.float32) for k in ("x", "y", "z"))
-        r2 = x * x + y * y + z * z
-        valid = np.isfinite(r2) & (r2 > cfg.sensor.min_range ** 2)
-        gt = gt_raw[valid]
-        keep = working_set(cloud, cfg.detection.max_range + 5.0)
-        cloud = cloud.subset(keep)
-        gt = gt[keep]
+        sensor = cfg.sensor
+        cloud = from_raw(raw, sensor.forward_axis, sensor.min_range, up_axis=sensor.up_axis,
+                         scan_pattern=sensor.scan_pattern, dual_returns=sensor.dual_returns,
+                         elevation_resolution_deg=sensor.elevation_resolution_deg,
+                         working_range=cfg.detection.max_range+5.0, preserve_source_index=True)
+        gt = gt_raw[cloud.source_index]
         res = pipe.process_cloud(cloud, ts * 1e-9, frame_index=i)
         d = res.data
         geo = res.geo

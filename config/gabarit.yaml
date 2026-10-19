@@ -1,13 +1,20 @@
 # Gabarit detector configuration. Every value is optional: missing keys keep
 # the defaults from gabarit/config.py. Main parameters:
-#   envelope.width / height   - clearance envelope (Q&A: 2.2 x 3.0 m)
+#   envelope.width / height   - clearance envelope (meeting 16 Oct: 2.1 x 3.0 m)
 #   envelope.min_height       - lower limit above the rail head
 #   sensor.forward_axis       - axis of the cloud pointing forward ("-y" for the provided bags)
+#   sensor.up_axis            - axis of the cloud pointing up ("+z" for Pandar)
+#   sensor.scan_pattern       - mechanical (Pandar) or mirror (Falcon Prime)
 #   sensor.auto_calibration   - estimate lidar height/pitch/roll from the rails
 #   tracking.confirm_hits     - frames needed to confirm an obstacle (near field)
 #   detection.max_range       - analysis horizon, m
 sensor:
   forward_axis: -y
+  up_axis: +z
+  scan_pattern: mechanical
+  dual_returns: true
+  azimuth_resolution_deg: 0.083
+  elevation_resolution_deg: 0.125
   auto_calibration: true
   default_height: 1.1
   default_pitch_deg: 0.0
@@ -36,8 +43,14 @@ track:
   temporal_weight: 0.6
   smooth_lateral: 3000000.0
   smooth_vertical: 30000000.0
+  hold_missing_frames: 4
+filter:
+  enabled: true
+  voxel_near: 0.08
+  voxel_growth: 0.003
+  min_neighbors: 1
 envelope:
-  width: 2.2
+  width: 2.1
   height: 3.0
   min_height: 0.12
   lateral_margin: 0.0
@@ -58,6 +71,11 @@ detection:
   low_max_range: 80.0
   low_max_lateral: 0.95
   low_min_points: 3
+  low_min_protrusion: 0.08
+  low_min_width: 0.12
+  low_dense_range: 35.0
+  low_single_beam_range: 50.0
+  hanging_max_range: 60.0
 tracking:
   gate: 2.0
   lateral_gate: 0.8
@@ -66,11 +84,12 @@ tracking:
   drop_misses: 4
   low_confirm_hits: 6
   low_confirm_window: 8
+  low_body_confirm_hits: 3
+  low_body_confirm_window: 4
+  low_single_confirm_hits: 8
+  low_single_confirm_window: 16
   far_distance: 60.0
   far_confirm_hits: 6
   far_confirm_window: 8
   far_lateral_std: 0.3
   max_speed: 25.0
-# emergency braking on an alarm: deceleration, m/s^2, and latency alarm -> brake command, s
-braking_deceleration: 2.5
-reaction_time: 0.3

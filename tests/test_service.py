@@ -1,4 +1,4 @@
-"""Service features: emergency braking of the demo, transparent obstacles,
+"""Service features: transparent obstacles,
 one user at a time, upload of recordings."""
 
 from __future__ import annotations
@@ -19,83 +19,6 @@ from gabarit.pipeline import Pipeline  # noqa: E402
 from gabarit.synth import SyntheticObstacle, inject  # noqa: E402
 from tests.sim import tunnel_scan  # noqa: E402
 from web.admin import Access, _extract_members, safe_name  # noqa: E402
-from web.session import BrakeGuard, BrakeSim  # noqa: E402
-
-
-def _meta(ids=(), status=None, v=15.0, dist=150.0):
-    obs = [{"track_id": i, "distance_m": dist, "lateral_m": 0.0} for i in ids]
-    return {"status": status or ("OBSTACLE" if ids else "CLEAR"), "obstacles": obs,
-            "speed_mps": v, "nearest_track_distance_m": dist if ids else None}
-
-
-def _drive_to_stop(g: BrakeGuard, meta: dict) -> None:
-    while not g.brake.done:
-        g.brake.advance(1.0)
-    g.hold(meta)
-
-
-def test_guard_brakes_without_operator_and_holds_while_occupied():
-    g = BrakeGuard(clear_frames=3)
-    assert g.start(_meta([7]), 0.3, 2.5) is not None      # no operator input needed
-    _drive_to_stop(g, _meta([7]))
-    assert g.holding
-    for _ in range(10):                                    # obstacle stays: train stays
-        assert not g.check_clear(_meta([7]))
-    assert g.holding
-
-
-def test_guard_resumes_by_itself_when_the_track_clears():
-    g = BrakeGuard(clear_frames=3)
-    g.start(_meta([7]), 0.3, 2.5)
-    _drive_to_stop(g, _meta([7]))
-    assert not g.check_clear(_meta())
-    assert not g.check_clear(_meta([7]))                  # it came back: counter restarts
-    assert [g.check_clear(_meta()) for _ in range(3)] == [False, False, True]
-    assert not g.holding and g.brake is None and g.last_release == "auto"
-    assert g.start(_meta([7]), 0.3, 2.5) is not None      # not exempt: brakes again
-
-
-def test_guard_override_exempts_only_those_objects():
-    g = BrakeGuard()
-    g.start(_meta([7]), 0.3, 2.5)
-    _drive_to_stop(g, _meta([7]))
-    assert g.override(_meta([7])) == {7}
-    assert not g.holding and g.last_release == "override"
-    assert g.start(_meta([7]), 0.3, 2.5) is None           # the operator took responsibility for #7
-    assert g.start(_meta([7, 9]), 0.3, 2.5) is not None    # a new obstacle brakes the train again
-    assert g.hold_ids == {9}
-
-
-def _drive(b: BrakeSim, dx: float) -> float:
-    t = 0.0
-    for _ in range(10000):
-        if b.done:
-            break
-        t += b.advance(dx)
-    return t
-
-
-def test_brake_stops_before_a_far_obstacle():
-    cfg = Config()
-    v = 80 / 3.6
-    b = BrakeSim(v, 140.0, cfg.reaction_time, cfg.braking_deceleration)
-    t = _drive(b, v * 0.1)
-    expected = v * cfg.reaction_time + v * v / (2 * cfg.braking_deceleration)
-    assert not b.collision and b.public()["stopped"]
-    assert abs(b.x - expected) < 0.05 and abs(b.stop_m - expected) < 1e-6
-    assert abs(t - (cfg.reaction_time + v / cfg.braking_deceleration)) < 0.05
-    assert b.public()["gap_m"] > 30
-
-
-def test_brake_reports_impact_when_too_close():
-    b = BrakeSim(60 / 3.6, 40.0, 0.3, 2.5)
-    _drive(b, 60 / 3.6 * 0.1)
-    p = b.public()
-    assert b.collision and not p["stopped"]
-    assert 30 < p["impact_kmh"] < 45          # braking still lowers the speed
-    assert b.x <= 39.0 + 1e-6
-
-
 def test_dual_return_split_marks_the_near_echo():
     rings, cols = 4, 6
     r = np.full((cols, rings), 20.0)

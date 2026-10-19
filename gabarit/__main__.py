@@ -14,6 +14,7 @@ import gabarit  # noqa: F401  (single-threaded BLAS before NumPy)
 
 import argparse
 import json
+import math
 import runpy
 import sys
 import time
@@ -32,21 +33,29 @@ def cmd_run(args: argparse.Namespace) -> int:
     reader = BagReader(open_bag(args.bag))
     pipe = Pipeline(cfg)
     out = open(args.jsonl, "w", encoding="utf-8") if args.jsonl else None
-    t_prev = None
+    wall_start = time.perf_counter()
+    first_stamp = None
     print(f"{reader.info.name}: {len(reader)} frames, topic {reader.info.topic}")
     print("frame  time_s  status    obstacle  distance_m  free_m  speed_kmh  latency_ms")
-    for i, ts, raw in reader.iterate():
-        if args.realtime and t_prev is not None:
-            time.sleep(max(0.0, (ts - t_prev) * 1e-9 - 0.001))
-        t_prev = ts
-        d = pipe.process_raw(raw, ts * 1e-9, frame_index=i).data
-        dist = "-" if d["nearest_distance_m"] is None else f"{d['nearest_distance_m']:.1f}"
-        print(f"{i:5d}  {(ts - reader.info.start_ns) / 1e9:6.2f}  {d['status']:8s}  {str(d['obstacle']):8s}  "
-              f"{dist:>10s}  {d['free_distance_m']:6.0f}  {d['speed_kmh']:9.1f}  {d['timing_ms']['total']:10.1f}")
+    try:
+        for i, ts, raw in reader.iterate():
+            if first_stamp is None:
+                first_stamp = ts
+            if args.realtime:
+                # Anchor playback to recording time: sleeping a whole frame
+                # period *after* processing would turn 10 Hz into ~6-7 Hz.
+                target = wall_start + (ts - first_stamp) * 1e-9 / args.rate
+                time.sleep(max(0.0, target - time.perf_counter()))
+            d = pipe.process_raw(raw, ts * 1e-9, frame_index=i).data
+            dist = "-" if d["nearest_distance_m"] is None else f"{d['nearest_distance_m']:.1f}"
+            print(f"{i:5d}  {(ts - reader.info.start_ns) / 1e9:6.2f}  {d['status']:8s}  {str(d['obstacle']):8s}  "
+                  f"{dist:>10s}  {d['free_distance_m']:6.0f}  {d['speed_kmh']:9.1f}  {d['timing_ms']['total']:10.1f}")
+            if out:
+                out.write(json.dumps(d, ensure_ascii=False, default=float) + "\n")
+    finally:
+        reader.close()
         if out:
-            out.write(json.dumps(d, ensure_ascii=False, default=float) + "\n")
-    if out:
-        out.close()
+            out.close()
     return 0
 
 
@@ -85,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("web", help="web interface")
     w.add_argument("--data", action="append",
-                   help="folder with bags, may be repeated (default: for_hackathon + synthetic_organizers)")
+                   help="folder with bags, may be repeated (default: data/extracted recursively)")
     w.add_argument("--config", default=None)
     w.add_argument("--host", default="127.0.0.1")
     w.add_argument("--port", default="8000")
@@ -95,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("bag", help="bag directory or .db3 file")
     r.add_argument("--config", default=None)
     r.add_argument("--realtime", action="store_true", help="pace frames like the sensor (10 Hz)")
+    r.add_argument("--rate", type=float, default=1.0, help="playback speed with --realtime (e.g. 0.5)")
     r.add_argument("--jsonl", default=None, help="also write the full result of every frame")
     e = sub.add_parser("evaluate", help="all bags of a directory")
     e.add_argument("data", nargs="?", default=str(DEFAULT_DATA))
@@ -108,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("check", help="check the environment and the data directory")
     c.add_argument("--data", default=str(DEFAULT_DATA))
     args = ap.parse_args(argv)
+    if args.cmd == "run" and (not math.isfinite(args.rate) or args.rate <= 0):
+        ap.error("--rate must be finite and positive")
 
     sys.path.insert(0, str(ROOT))
     if args.cmd == "web":

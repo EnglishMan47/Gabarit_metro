@@ -1,37 +1,32 @@
 #!/usr/bin/env bash
 # Gabarit command line inside the container.
 set -e
+# docker exec does not inherit the environment sourced by PID 1's entrypoint.
+source /opt/ros/humble/setup.bash
+source /opt/gabarit/ros_ws/install/setup.bash
 CFG=${GABARIT_CONFIG:-/opt/gabarit/config/gabarit.yaml}
 DATA=${GABARIT_DATA:-/data}
 cmd=${1:-detect}; shift || true
 
-find_bag() {  # accept a bag directory, a .db3 file or a bag name under $DATA
-  local b="$1"
-  if [ -z "$b" ]; then ls -d "$DATA"/*/ 2>/dev/null | head -n1; return; fi
-  if [ -e "$b" ]; then echo "$b"; return; fi
-  if [ -e "$DATA/$b" ]; then echo "$DATA/$b"; return; fi
-  find "$DATA" -maxdepth 3 -type d -name "$b" | head -n1
-}
-
 case "$cmd" in
+  shell)
+    exec bash "$@" ;;
+  workspace) # persistent detector + RViz; bags controlled in another shell
+    exec python3 /opt/gabarit/docker/workspace.py "$@" ;;
+  bag)      # list/play/switch/pause/resume/rate/stop/status/log
+    exec python3 /opt/gabarit/docker/bag_control.py "$@" ;;
+  rviz)
+    exec rviz2 -d /opt/gabarit/ros_ws/install/gabarit_ros/share/gabarit_ros/rviz/gabarit.rviz "$@" ;;
   detect)   # ROS 2 node; web UI (live) on :8080
     exec ros2 launch gabarit_ros gabarit.launch.py config:="$CFG" "$@" ;;
-  demo)     # node + ros2 bag play of one bag; open http://localhost:8080
-    BAG=$(find_bag "$1"); shift || true
-    [ -n "$BAG" ] || { echo "bag not found (mount the dataset to $DATA)"; exit 1; }
-    if [ "${GABARIT_COPY:-0}" = "1" ]; then   # slow bind mounts (Docker Desktop on Windows/macOS)
-      echo ">>> copying $BAG into the container..."
-      cp -r "$BAG" /tmp/bag && BAG=/tmp/bag
-    fi
-    ros2 launch gabarit_ros gabarit.launch.py config:="$CFG" &
-    NODE=$!
-    sleep 4
-    echo ">>> ros2 bag play $BAG   (web: http://localhost:8080)"
-    ros2 bag play "$BAG" "$@" || true
-    sleep 2
-    kill $NODE 2>/dev/null || true ;;
+  demo)     # persistent node + RViz + initial bag; switch later via gabarit bag
+    [ -n "${1:-}" ] || { echo 'usage: gabarit demo BAG [-- ros2 bag play options]' >&2; exit 2; }
+    BAG="$1"; shift
+    [ "${1:-}" != "--" ] || shift
+    exec python3 /opt/gabarit/docker/workspace.py --bag "$BAG" --config "$CFG" -- "$@" ;;
   play)     # only play a bag (use together with `detect` in another container/shell)
-    BAG=$(find_bag "$1"); shift || true
+    [ -n "${1:-}" ] || { echo 'usage: gabarit play BAG [ros2 bag play options]' >&2; exit 2; }
+    BAG=$(python3 -c 'import sys; sys.path.insert(0,"/opt/gabarit/docker"); from bag_control import resolve_bag; from pathlib import Path; print(resolve_bag(sys.argv[1],Path(sys.argv[2])))' "$1" "$DATA"); shift
     exec ros2 bag play "$BAG" "$@" ;;
   web)      # standalone playback UI without ROS on :8000
     exec python3 -m web.server --data "$DATA" --config "$CFG" --host 0.0.0.0 --port 8000 "$@" ;;
@@ -42,6 +37,6 @@ case "$cmd" in
   test)
     exec python3 -m pytest -q tests "$@" ;;
   help|--help|-h)
-    sed -n '2,30p' /opt/gabarit/docker/USAGE.txt ;;
+    cat /opt/gabarit/docker/USAGE.txt ;;
   *) exec "$cmd" "$@" ;;
 esac

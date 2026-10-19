@@ -1,0 +1,6 @@
+# Read-only SQLite optimization, especially for Docker Desktop bind mounts.
+# These settings do not modify the recording.
+read:
+  pragmas:
+    - mmap_size = 2147483648
+    - cache_size = -65536

@@ -1,0 +1,18 @@
+# Native Falcon Prime coordinates (manual section 1.4): x up, y right, z forward.
+# Verify the actual ROS PointCloud2 xyz axes: a driver may already use REP-103.
+# These settings are a separate profile; unspecified keys retain detector defaults.
+sensor:
+  forward_axis: +z
+  up_axis: +x
+  scan_pattern: mirror
+  dual_returns: false
+  # Nominal ROI resolution, not a promise of equal density outside the ROI.
+  azimuth_resolution_deg: 0.09
+  elevation_resolution_deg: 0.08
+  density_azimuth_resolution_deg: 0.18
+  density_elevation_resolution_deg: 0.24
+  min_range: 1.5
+track:
+  horizon: 350.0
+detection:
+  max_range: 350.0

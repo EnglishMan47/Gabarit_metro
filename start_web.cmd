@@ -1,9 +1,12 @@
 @echo off
 rem Gabarit: web interface without Docker/ROS (Windows).
 rem   start_web.cmd [folder with bags]
-rem   without a folder: data\extracted\for_hackathon and data\extracted\synthetic_organizers
+rem   without a folder: recursively scan data\extracted
 cd /d "%~dp0"
-if not exist ".venv\Scripts\python.exe" powershell -ExecutionPolicy Bypass -File install.ps1
+if not exist ".venv\Scripts\python.exe" (
+    powershell -ExecutionPolicy Bypass -File install.ps1
+    if errorlevel 1 exit /b 1
+)
 set DATA_ARG=
 if not "%~1"=="" set DATA_ARG=--data "%~1"
 echo.

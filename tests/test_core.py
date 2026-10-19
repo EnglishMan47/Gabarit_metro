@@ -161,7 +161,9 @@ def test_bag_titles_are_readable():
     assert "Человек" in title and group == "С препятствиями"
     assert bag_title("cloud_with_fake_obj")[1] == "Синтетические препятствия"
     title, group = bag_title("roundT_platform")          # unknown: built from the words
-    assert title == "Круглый тоннель, платформа" and group.startswith("Штатные")
+    assert title == "Круглый тоннель, платформа" and group == "Записи без разметки"
+    assert bag_title("falcon_test_second_dark")[1] == "Записи без разметки"
+    assert bag_title("new_data")[1] == "Записи без разметки"
 
 
 def test_egomotion_recovers_after_a_wrong_lock():

@@ -222,15 +222,15 @@ export class Scene3D {
   _rebuild() {
     const fr = this.frame, tr = fr.track;
     [this.envGroup, this.pathGroup, this.wallGroup, this.boxGroup, this.markGroup].forEach((g) => this._clear(g));
-    const W = (fr.envelope && fr.envelope.width_m) || 2.2, H = (fr.envelope && fr.envelope.height_m) || 3.0;
+    const W = (fr.envelope && fr.envelope.width_m) || 2.1, H = (fr.envelope && fr.envelope.height_m) || 3.0;
     const obs = tr.observed_until || 0;
     const alarm = fr.status === 'OBSTACLE', check = fr.status === 'CHECK';
     const envColor = alarm ? 0xef4444 : check ? 0xf59e0b : 0x22c55e;
     const S = tr.s, C = tr.c, Z = tr.z;
     // beyond the observed range the path is only extrapolated and jitters from
-    // frame to frame: draw a short grey hint of it, not a 200 m tail (the
+    // frame to frame: draw only a short grey hint of its extrapolated tail (the
     // radar strip shows the unobserved part as hatching)
-    const sDraw = Math.min(200, S[S.length - 1], Math.max(obs, 20) + 15);
+    const sDraw = Math.min(fr.analysis_range_m || 200, S[S.length - 1], Math.max(obs, 20) + 15);
     // --- envelope: translucent walls + roof edges, dimmer beyond the observed range
     if (this.layers.envelope) {
       const build = (s0, s1, opacity, color) => {
@@ -298,7 +298,7 @@ export class Scene3D {
     }
     // --- distance markers
     if (this.layers.markers) {
-      for (let s = 25; s <= 200; s += 25) {
+      for (let s = 25; s <= sDraw; s += 25) {
         if (s > sDraw) break;
         const c = interp(S, C, s), z = interp(S, Z, s);
         const sp = labelSprite(`${s} м`, s <= obs ? '#9fb3c8' : '#566476', s % 50 ? 0.9 : 1.2);
@@ -310,10 +310,11 @@ export class Scene3D {
     }
     // --- boxes of obstacles / pending tracks / synthetic ground truth
     if (this.layers.boxes) {
-      const addBox = (b, color, label, dashed = false) => {
+      const addBox = (b, color, label, dashed = false, heading = 0) => {
         const s0 = b.s[0], s1 = Math.max(b.s[1], s0 + 0.3);
         const d0 = b.d[0], d1 = b.d[1], h0 = b.h[0], h1 = b.h[1];
-        const c = interp(S, C, s0), z = interp(S, Z, s0);
+        const center = (s0 + s1) / 2;
+        const c = interp(S, C, center), z = interp(S, Z, center);
         const cx = c + (d0 + d1) / 2, cz = z + (h0 + h1) / 2;
         const geo = new THREE.BoxGeometry(s1 - s0 + 0.2, Math.max(h1 - h0, 0.1) + 0.2, Math.max(d1 - d0, 0.1) + 0.2);
         const mat = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.3, gapSize: 0.2, depthTest: false })
@@ -321,6 +322,7 @@ export class Scene3D {
         const box = new THREE.LineSegments(new THREE.EdgesGeometry(geo), mat);
         if (dashed) box.computeLineDistances();
         box.position.copy(tv(cx, (s0 + s1) / 2, cz));
+        box.rotation.y = heading;
         box.renderOrder = 6;
         this.boxGroup.add(box);
         if (!dashed) {
@@ -339,7 +341,9 @@ export class Scene3D {
       if (this.layers.candidates) (fr.candidates || []).filter((c) => c.rejected).forEach((c) => addBox(c.box, 0x64748b, null));
       (fr.synthetic || []).forEach((o) => {
         const w = o.width, h = o.height, l = o.length;
-        addBox({ s: [o.s - l / 2, o.s + l / 2], d: [o.d - w / 2, o.d + w / 2], h: [o.base, o.base + h] }, 0xc084fc, `тест ${o.s.toFixed(0)} м`, true);
+        const slope = interp(S, C, o.s + 0.5) - interp(S, C, o.s - 0.5);
+        const heading = Math.atan(slope) + (o.yaw_deg || 0) * Math.PI / 180;
+        addBox({ s: [o.s - l / 2, o.s + l / 2], d: [o.d - w / 2, o.d + w / 2], h: [o.base, o.base + h] }, 0xc084fc, `тест ${o.s.toFixed(0)} м`, true, heading);
       });
     }
   }
@@ -355,7 +359,7 @@ export class Scene3D {
     if (!this.raycaster.ray.intersectPlane(plane, p)) return null;
     const s = p.x, x = -p.z;
     const tr = this.frame.track;
-    if (s < 5 || s > 200) return null;
+    if (s < 5 || s > (this.frame.analysis_range_m || 200)) return null;
     return { s, d: x - interp(tr.s, tr.c, s) };
   }
 

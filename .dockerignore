@@ -1,6 +1,8 @@
 .git
 .venv
 .data
+data
+results
 датасет
 датасет.zip
 artifacts
@@ -8,5 +10,9 @@ private
 *.mp4
 *.pdf
 *.zip
+*.zst
+*.opus
+*.db3
+*.mcap
 **/__pycache__
 ros2/ws
