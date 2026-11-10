@@ -163,6 +163,44 @@ class TrackingConfig:
 
 
 @dataclass(frozen=True)
+class ModelsConfig:
+    # The compact forest is NumPy-only; neural inference is an optional extra.
+    component_policy: str = "score"
+    component_min_score: float = 0.90
+    component_min_hits: int = 3
+    learned_path: bool = False
+    far_path_weights: str = ".models/attention_please/far_bev.pt"
+    device: str = "auto"
+    path_interval: int = 10
+    path_max_sigma: float = 0.35
+    path_min_distance: float = 40.0
+    path_max_lateral_change: float = 0.60
+    path_max_vertical_change: float = 0.20
+    path_blend: float = 0.25
+    path_confirmations: int = 2
+
+    def __post_init__(self) -> None:
+        for name in ("component_min_hits", "path_interval", "path_confirmations"):
+            if type(getattr(self, name)) is not int:
+                raise ValueError(f"{name} must be an integer")
+        if self.component_policy not in ("off", "score", "assist"):
+            raise ValueError("component_policy must be off, score or assist")
+        if not 0.0 <= self.component_min_score <= 1.0:
+            raise ValueError("component_min_score must be in [0, 1]")
+        if self.component_min_hits < 2 or self.path_interval < 1 or self.path_confirmations < 2:
+            raise ValueError("model confirmation needs at least two hits; path_interval must be positive")
+        if self.device not in ("auto", "cpu", "cuda"):
+            raise ValueError("model device must be auto, cpu or cuda")
+        if not 0.0 < self.path_blend <= 1.0:
+            raise ValueError("path_blend must be in (0, 1]")
+        for name in ("path_max_sigma", "path_max_lateral_change", "path_max_vertical_change"):
+            if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+        if not math.isfinite(self.path_min_distance) or self.path_min_distance < 0.0:
+            raise ValueError("path_min_distance must be finite and nonnegative")
+
+
+@dataclass(frozen=True)
 class Config:
     sensor: SensorConfig = field(default_factory=SensorConfig)
     track: TrackConfig = field(default_factory=TrackConfig)
@@ -170,6 +208,7 @@ class Config:
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     filter: FilterConfig = field(default_factory=FilterConfig)
+    models: ModelsConfig = field(default_factory=ModelsConfig)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -213,6 +252,8 @@ def _merge(obj: Any, overrides: dict[str, Any]) -> Any:
         elif isinstance(current, bool):
             changes[key] = bool(value)
         elif isinstance(current, (int, float)) and not isinstance(current, bool):
+            if isinstance(obj, ModelsConfig) and isinstance(current, int) and type(value) is not int:
+                raise ValueError(f"{key} must be an integer")
             changes[key] = type(current)(value)
         else:
             changes[key] = value

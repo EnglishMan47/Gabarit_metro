@@ -31,6 +31,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt 'numpy>=1.25,<2'
 
+# Optional winner network. Keep the standard CPU image small and ROS-compatible.
+ARG WITH_NEURAL=0
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+COPY requirements-neural.txt /tmp/requirements-neural.txt
+RUN if [ "$WITH_NEURAL" = "1" ]; then \
+        python3 -m pip install --no-cache-dir --index-url "$TORCH_INDEX_URL" -r /tmp/requirements-neural.txt; \
+    elif [ "$WITH_NEURAL" != "0" ]; then \
+        echo 'WITH_NEURAL must be 0 or 1' >&2; exit 1; \
+    fi
+
 WORKDIR /opt/gabarit
 COPY gabarit ./gabarit
 COPY web ./web

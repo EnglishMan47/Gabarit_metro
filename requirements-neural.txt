@@ -1,0 +1,3 @@
+# Optional FarBevNet inference only. Core detector does not require PyTorch.
+# Select an appropriate official CPU/CUDA wheel index for your environment.
+torch==2.9.1

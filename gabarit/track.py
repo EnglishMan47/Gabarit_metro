@@ -21,6 +21,7 @@ import numpy as np
 
 from gabarit.config import Config
 from gabarit.filtering import support_mask
+from gabarit.numerics import BandedLDL, third_difference_bands
 
 LAT_BIN = 0.04
 LAT_MIN, LAT_MAX = -8.0, 8.0
@@ -326,8 +327,7 @@ def _smooth_profile(x: np.ndarray, meas: list, prior: np.ndarray | None, prior_s
     val = m[:, 1].copy()
     w0 = 1.0 / m[:, 2]
     src = m[:, 3].astype(int)
-    D = np.diff(np.eye(ng), 3, axis=0)
-    P = lam * (D.T @ D)
+    penalty_bands = lam * third_difference_bands(ng)
     pw = np.zeros(ng)
     pv = np.zeros(ng)
     if prior is not None:
@@ -343,12 +343,13 @@ def _smooth_profile(x: np.ndarray, meas: list, prior: np.ndarray | None, prior_s
         pw[near] = 0.0
     w = w0.copy()
     for it in range(4):
-        A = P.copy()
-        A[np.diag_indices(ng)] += pw + 1e-6
+        bands = penalty_bands.copy()
+        bands[0] += pw + 1e-6
         b = pw * pv
-        np.add.at(A, (k, k), w)
+        np.add.at(bands[0], k, w)
         np.add.at(b, k, w * val)
-        sol = np.linalg.solve(A, b)
+        factor = BandedLDL(bands)
+        sol = factor.solve(b)
         r = (val - sol[k]) * np.sqrt(w0)
         w = w0 * np.where(np.abs(r) < huber, 1.0, huber / np.maximum(np.abs(r), 1e-9))
         if side_steps and it == 1:
@@ -362,7 +363,7 @@ def _smooth_profile(x: np.ndarray, meas: list, prior: np.ndarray | None, prior_s
                 med = np.array([np.median(res_side[max(0, j - 3): j + 4]) for j in range(len(sel))])
                 val[sel] -= np.where(np.abs(med) > 0.15, med, 0.0)
     try:
-        cov_diag = np.diag(np.linalg.inv(A))
+        cov_diag = factor.inverse_diagonal()
     except np.linalg.LinAlgError:  # pragma: no cover
         cov_diag = np.full(ng, 0.25)
     sig = np.interp(x, grid, np.sqrt(np.maximum(cov_diag, 1e-6)))
@@ -399,6 +400,9 @@ class TrackModel:
     # returns. Measurement flags still refer to this frame only.
     coast_frames: int = 0
     current_observed_until: float | None = None
+    # Total uncertainty of the temporally mixed vertical path. sig_z remains
+    # local floor measurement noise for clearance extraction.
+    sig_z_path: np.ndarray | None = None
 
     def at(self, f: np.ndarray):
         """Interpolated centre, rail height and uncertainty at distances ``f``."""
@@ -435,6 +439,9 @@ class TrackModel:
             "c": np.round(self.c[sl], 3).tolist(),
             "z": np.round(self.z[sl], 3).tolist(),
             "sig_c": np.round(self.sig_c[sl], 3).tolist(),
+            "sig_z": np.round(self.sig_z[sl], 3).tolist(),
+            "sig_z_path": np.round((self.sig_z_path if self.sig_z_path is not None
+                                     else self.sig_z)[sl], 3).tolist(),
             "observed_until": round(self.observed_until, 1),
             "rail_until": round(self.rail_until, 1),
             "coasted_frames": self.coast_frames,

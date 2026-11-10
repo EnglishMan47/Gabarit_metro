@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/ikonushok/lidar-metro-obstacle-detection",
+  "revision": "3cfd31843b911f278c08f49e53a09b1a5efa1d92",
+  "copyright": "Copyright (c) 2026 saic",
+  "license": "MIT",
+  "feature_extraction_source": "src/cpp/curve_envelope_core.cpp::BaselineV3AssistScoreFeatures and ComputeComponentShapeStats",
+  "files": {
+    "baseline_v3_runtime_policy.json": {
+      "upstream_path": "models/baseline_v3_runtime_policy.json",
+      "sha256": "286fbf5dc352ca8b2d6ee386092862309880ecac0549b48402f49ca137a61661"
+    },
+    "baseline_v3_assist_model.inc": {
+      "upstream_path": "src/cpp/baseline_v3_assist_model.inc",
+      "sha256": "7aa878a48fb297fe33444584436c3b298d2fc4be6cec969106d5171c7010fe0c"
+    },
+    "LICENSE": {
+      "upstream_path": "LICENSE",
+      "sha256": "8d8dde060ff6eb2a1a2c4391d771b736e9c21d92957794d5728aec861d55f165"
+    }
+  },
+  "adaptation": "The original JSON weights and C++ reference are unchanged. Python feature extraction and forest evaluation are in gabarit.component_model. Local policy permits positive assistance only and never vetoes existing geometry."
+}

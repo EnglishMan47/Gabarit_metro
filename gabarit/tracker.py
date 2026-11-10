@@ -316,6 +316,9 @@ class Tracker:
                lev: np.ndarray | None = None, ring: np.ndarray | None = None,
                geo: FrameGeometry | None = None) -> list[Track]:
         tc = self.cfg.tracking
+        history_limit = max(12, tc.confirm_window, tc.far_confirm_window,
+                            tc.low_confirm_window, tc.low_body_confirm_window,
+                            tc.low_single_confirm_window)
         self.frame += 1
         good = [c for c in cands if c.rejected in (None, 'low_score')
                 and (not c.single_beam or allow_single and abs(delta) <= 0.01)]
@@ -411,10 +414,13 @@ class Tracker:
                 t.strict_history.append(0)
                 t.resolved_history.append(0)
                 t.misses += 1
-            del t.history[:-max(tc.low_single_confirm_window, 12)]
-            del t.body_history[:-max(tc.low_body_confirm_window, 12)]
-            del t.wide_body_history[:-max(tc.low_body_confirm_window, 12)]
-            del t.strict_history[:-max(tc.low_confirm_window, 12)]
+            # Configured confirmation windows may exceed the historical
+            # 12/16-scan defaults. Truncating earlier silently made valid
+            # longer confirmation policies impossible to satisfy.
+            del t.history[:-history_limit]
+            del t.body_history[:-history_limit]
+            del t.wide_body_history[:-history_limit]
+            del t.strict_history[:-history_limit]
             del t.resolved_history[:-12]
             win, need = self._confirmation(t)
             body = self._low_body(t.cand)

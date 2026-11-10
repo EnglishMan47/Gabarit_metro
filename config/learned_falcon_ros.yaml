@@ -1,0 +1,20 @@
+# Falcon Prime ROS recording: +X forward, +Z up, mirror scan.
+sensor:
+  forward_axis: +x
+  up_axis: +z
+  scan_pattern: mirror
+  dual_returns: false
+  azimuth_resolution_deg: 0.09
+  elevation_resolution_deg: 0.08
+  density_azimuth_resolution_deg: 0.18
+  density_elevation_resolution_deg: 0.24
+  min_range: 1.5
+track:
+  horizon: 350.0
+detection:
+  max_range: 350.0
+models:
+  learned_path: true
+  component_policy: score
+  device: auto
+  path_interval: 10

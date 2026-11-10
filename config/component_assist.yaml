@@ -1,0 +1,6 @@
+# Explicit positive-only assistance; does not disable geometric rejection rules.
+# Pandar defaults. For another sensor merge models into its sensor profile.
+models:
+  component_policy: assist
+  component_min_score: 0.90
+  component_min_hits: 3

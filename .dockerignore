@@ -1,5 +1,6 @@
 .git
 .venv
+.models
 .data
 data
 results

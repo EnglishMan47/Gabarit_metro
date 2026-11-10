@@ -124,6 +124,7 @@ def test_obstacle_does_not_change_playback_or_block_manual_controls(monkeypatch)
                 await ws.send_json({'cmd': 'seek', 'index': 50})
                 assert (await receive(ws, 'frame'))['frame'] == 50
                 await ws.send_json({'cmd': 'step', 'delta': 1})
+                assert not (await receive(ws, 'state'))['playing']
                 assert (await receive(ws, 'frame'))['frame'] == 51
                 await ws.send_json({'cmd': 'play'})
                 assert (await receive(ws, 'state'))['playing']

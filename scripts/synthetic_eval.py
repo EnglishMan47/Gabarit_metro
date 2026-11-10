@@ -23,6 +23,7 @@ import argparse
 import hashlib
 import json
 import time
+from types import SimpleNamespace
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
@@ -133,7 +134,8 @@ def run_case(args: tuple) -> dict:
         d = res.data
         if active:
             target = target_raw[res.cloud.source_index]
-            hit_c, hit_o, other_alarm = matcher.update(res, pipe.tracker, target, ob.s)
+            output = SimpleNamespace(tracks=pipe.output_tracks, cfg=cfg)
+            hit_c, hit_o, other_alarm = matcher.update(res, output, target, ob.s)
             if np.any(target):
                 visible_frames += 1
                 missed_visible_frames += int(not hit_o)
@@ -160,7 +162,7 @@ def run_case(args: tuple) -> dict:
                         'associated_track_ids':sorted(matcher.track_ids),
                         'obstacles':[dict(t.public(), target_points=(int(target[t.cand.point_index].sum())
                                 if t.cand.point_index is not None else 0))
-                                     for t in pipe.tracker.tracks if t.confirmed]})
+                                     for t in pipe.output_tracks if t.confirmed]})
             timeline.append((i, round(ob.s, 2), int(hit_c), int(hit_o)))
             ob.s -= ref_delta if reference is not None else d["displacement_m"]
             min_s = min(min_s, ob.s)

@@ -1,4 +1,5 @@
 import { Scene3D } from '/static/js/scene.js';
+import { coverage, decisionView, streamView, decodeFrame, finite, clamp } from '/static/js/viewer_state.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 0) => (v === null || v === undefined || Number.isNaN(v) ? '—' : Number(v).toFixed(d));
@@ -10,7 +11,50 @@ const state = {
   frame: null, timeline: [], alarmIds: new Set(),
   perfHist: [], lastArrive: 0, fpsHist: [], shapes: {}, baseConfig: null, sensorProfiles: {},
   token: null, busy: false, noReconnect: false, pendingOpen: null,
+  connected: false, frameInvalid: false, selectedObstacle: null,
 };
+
+function notify(message) {
+  $('noticeText').textContent = String(message);
+  $('notice').classList.remove('hidden');
+}
+$('noticeClose').onclick = () => $('notice').classList.add('hidden');
+
+function updateStreamState() {
+  const view = streamView({ connected: state.connected, mode: state.mode, playing: state.playing,
+    hasFrame: Boolean(state.frame), lastArrive: state.lastArrive, now: performance.now() });
+  if (state.frameInvalid) { view.stale = true; view.kind = 'off'; view.label = 'Кадр не прочитан · показаны предыдущие данные'; }
+  $('streamState').className = `stream-state ${view.kind}`;
+  $('streamState').textContent = view.label;
+  $('viewport').classList.toggle('stale', view.stale);
+  if (view.stale) {
+    $('statusCard').className = 'status-card state-warn';
+    $('statusLabel').textContent = 'НЕТ АКТУАЛЬНЫХ ДАННЫХ';
+    $('statusSub').textContent = 'Показан последний полученный кадр; состояние пути сейчас неизвестно';
+  } else if (state.frame) renderStatus(state.frame);
+}
+setInterval(updateStreamState, 1000);
+
+function clearFrame() {
+  state.frame = null; state.playing = false; state.frameInvalid = false;
+  state.lastArrive = 0; state.fpsHist = []; state.perfHist = []; state.alarmIds.clear();
+  state.selectedObstacle = null;
+  scene.clear();
+  $('statusCard').className = 'status-card state-idle';
+  $('statusLabel').textContent = 'ОЖИДАНИЕ ДАННЫХ';
+  $('statusMain').textContent = '—'; $('statusSub').textContent = 'запись открывается и детектор прогревается';
+  $('statusNote').classList.add('hidden'); $('obstacles').replaceChildren(); $('synList').replaceChildren();
+  ['mSpeed', 'mFree', 'mEnvelope', 'mTtc', 'frameLabel', 'coverageRange'].forEach((id) => $(id).textContent = '—');
+  $('mFree').title = '';
+  $('timeLabel').textContent = ''; $('calibBox').textContent = ''; $('sysInfo').textContent = '—';
+  $('coverageFresh').style.width = $('coverageHeld').style.width = '0%';
+  $('coverageDetail').textContent = 'Нет измерений';
+  $('viewport').classList.remove('alarm', 'check');
+  $('btnPlay').innerHTML = '&#9654;';
+  $('perfBars').replaceChildren();
+  for (const id of ['radar', 'perfChart']) { const canvas = $(id); canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); }
+  updateStreamState();
+}
 
 // ------------------------------------------------------------------ modal
 function showModal(title, text, actions = [], progress = null) {
@@ -33,17 +77,27 @@ function connect() {
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
   ws.binaryType = 'arraybuffer';
   state.ws = ws;
-  ws.onopen = () => { $('conn').className = 'conn on'; };
+  ws.onopen = () => { state.connected = true; $('conn').className = 'conn on'; updateStreamState(); };
   ws.onclose = () => {
+    if (state.ws !== ws) return;
+    state.connected = false;
     $('conn').className = 'conn off';
+    updateStreamState();
     if (!state.noReconnect) setTimeout(connect, state.busy ? 10000 : 1500);
   };
   ws.onmessage = (ev) => {
-    if (typeof ev.data === 'string') onJson(JSON.parse(ev.data));
-    else onFrame(ev.data);
+    try {
+      if (typeof ev.data === 'string') onJson(JSON.parse(ev.data));
+      else onFrame(ev.data);
+    } catch (error) {
+      state.frameInvalid = true; notify(`Не удалось прочитать данные: ${error.message}`); updateStreamState();
+    }
   };
 }
-const send = (obj) => { if (state.ws && state.ws.readyState === 1) state.ws.send(JSON.stringify(obj)); };
+const send = (obj) => {
+  if (state.ws && state.ws.readyState === 1) { state.ws.send(JSON.stringify(obj)); return true; }
+  notify('Нет соединения с сервером. Команда не отправлена.'); return false;
+};
 
 function onJson(m) {
   if (m.type === 'hello') {
@@ -58,6 +112,8 @@ function onJson(m) {
     ['sensorProfile', 'pApply', 'pReset'].forEach((id) => { $(id).disabled = m.mode === 'live'; });
     $('liveBadge').classList.toggle('hidden', m.mode !== 'live');
     $('transport').classList.toggle('hidden', m.mode === 'live');
+    $('previousEvent').disabled = $('nextEvent').disabled = m.mode === 'live';
+    $('timelineHint').textContent = m.mode === 'live' ? 'История полученных кадров' : 'Нажмите на ленту, чтобы перейти к кадру';
     if (m.mode === 'live') {   // no seeking / synthetic obstacles on a live ROS 2 stream
       $('btnScan').classList.add('hidden');
       document.querySelector('#tabs button[data-tab="test"]').classList.add('hidden');
@@ -86,11 +142,14 @@ function onJson(m) {
     if (state.pendingOpen) { $('bagSelect').value = state.pendingOpen; openBag(state.pendingOpen); state.pendingOpen = null; }
     else if (state.bag) $('bagSelect').value = state.bag.id;
   } else if (m.type === 'opened') {
+    clearFrame();
     state.bag = m.bag; state.frames = m.frames; state.timeline = new Array(m.frames).fill(null);
     state.alarmIds.clear();
     drawTimeline(); $('tlEvents').innerHTML = ''; $('scanState').textContent = '';
   } else if (m.type === 'state') {
     state.playing = m.playing; $('btnPlay').innerHTML = m.playing ? '&#10074;&#10074;' : '&#9654;';
+    $('btnPlay').setAttribute('aria-label', m.playing ? 'Пауза' : 'Воспроизвести');
+    updateStreamState();
   } else if (m.type === 'timeline') {
     if (m.bag && state.bag && m.bag !== state.bag.id) return;
     m.items.forEach((it) => { state.timeline[it.i] = it; });
@@ -103,26 +162,19 @@ function onJson(m) {
   } else if (m.type === 'config') {
     setDetectorControls(m.config);
   } else if (m.type === 'error') {
-    console.warn(m.message);
+    notify(m.message);
   }
 }
 
 function onFrame(buf) {
-  const dv = new DataView(buf);
-  const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-  if (magic !== 'GBR1') return;
-  const jlen = dv.getUint32(4, true);
-  const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, jlen)));
-  let o = 8 + jlen;
-  const n = dv.getUint32(o, true); o += 4;
-  const xyz = new Float32Array(buf, o, n * 3); o += n * 12;
-  const cls = new Uint8Array(buf, o, n); o += n;
-  const inten = new Uint8Array(buf, o, n);
+  const { meta, points } = decodeFrame(buf);
+  if (state.mode !== 'live' && meta.bag && state.bag && meta.bag !== state.bag.id) return;
   const now = performance.now();
-  if (state.lastArrive) state.fpsHist.push(1000 / (now - state.lastArrive));
+  if (state.lastArrive && now > state.lastArrive && now - state.lastArrive < 3000) state.fpsHist.push(now - state.lastArrive);
   state.lastArrive = now;
   if (state.fpsHist.length > 20) state.fpsHist.shift();
   state.frame = meta;
+  state.frameInvalid = false;
   if (state.mode === 'live') {
     // a live stream has no length: the strip shows the last 60 s (600 frames)
     const LIVE_N = 600;
@@ -139,14 +191,16 @@ function onFrame(buf) {
     state.timeline[meta.frame] = { i: meta.frame, status: meta.status, dist: meta.nearest_distance_m, v: meta.speed_kmh,
       ids: meta.obstacles.map((x) => x.track_id), ms: meta.timing_ms.total, ...(prev && prev.fromScan ? {} : {}) };
   }
-  scene.update(meta, { n, xyz, cls, inten });
+  scene.update(meta, points);
   renderStatus(meta);
   renderObstacles(meta);
   renderSynthetic(meta);
   renderPerf(meta);
   drawRadar(meta);
   drawTimeline();
+  if (meta.obstacles.some((item) => !state.alarmIds.has(item.track_id))) renderEvents();
   signalAlarm(meta);
+  updateStreamState();
 }
 
 function fillBags(bags) {
@@ -156,8 +210,16 @@ function fillBags(bags) {
   const groups = new Map();
   bags.forEach((b) => { const g = b.group || 'Записи'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(b); });
   const keys = [...groups.keys()].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
-  $('bagSelect').innerHTML = keys.map((g) => `<optgroup label="${g}">${groups.get(g).map((b) =>
-    `<option value="${b.id}" title="${b.name} · ${b.frames} кадров">${b.title || b.name} · ${b.duration_s.toFixed(0)} с</option>`).join('')}</optgroup>`).join('');
+  $('bagSelect').replaceChildren(...keys.map((g) => {
+    const group = document.createElement('optgroup'); group.label = g;
+    groups.get(g).forEach((b) => {
+      const option = document.createElement('option'); option.value = b.id;
+      option.title = `${b.name} · ${b.frames} кадров`;
+      option.textContent = `${b.title || b.name} · ${fmt(b.duration_s)} с`;
+      group.appendChild(option);
+    });
+    return group;
+  }));
 }
 
 // ------------------------------------------------------------------ status
@@ -165,41 +227,56 @@ const SHAPE_RU = { person: 'человек', person_sitting: 'человек с�
 
 function renderStatus(m) {
   const card = $('statusCard'), vp = $('viewport');
-  let cls = 'state-ok', label = 'ПУТЬ СВОБОДЕН', main = `${fmt(m.free_distance_m)} м`, sub = 'путь проверен и свободен на это расстояние';
+  const view = decisionView(m), area = view.area;
+  let cls = `state-${view.kind}`, label = view.label, main = `${fmt(m.free_distance_m)} м`,
+    sub = 'На измеренном участке подтверждённых препятствий нет';
   if (m.status === 'OBSTACLE') {
     const o = m.obstacles[0];
     cls = 'state-bad'; label = 'ПРЕПЯТСТВИЕ';
     main = `${fmt(m.nearest_distance_m, 1)} м`;
-    const when = m.time_to_obstacle_s ? `через ${fmt(m.time_to_obstacle_s, 1)} с` : 'поезд стоит';
-    sub = `ближайший из ${m.obstacles.length}: ${obKind(o)}, смещение ${fmt(o.lateral_m, 2)} м · ${when}`;
+    const when = finite(m.time_to_obstacle_s) ? `до объекта ${fmt(m.time_to_obstacle_s, 1)} с` : 'время до объекта не определено';
+    sub = o ? `ближайший из ${m.obstacles.length}: ${obKind(o)}, смещение ${fmt(o.lateral_m, 2)} м · ${when}` : 'Подтверждённое препятствие на пути';
   } else if (m.status === 'CHECK') {
     const o = m.pending[0];
     cls = 'state-warn'; label = 'ПРОВЕРКА ОБЪЕКТА';
-    main = `${fmt(o.distance_m, 0)} м`; sub = 'возможное препятствие подтверждается на следующих кадрах';
+    main = `${fmt(o?.distance_m, 0)} м`; sub = 'возможное препятствие подтверждается на следующих кадрах';
   } else if (m.status === 'DEGRADED') {
     cls = 'state-warn'; label = 'НЕТ ОПОРЫ ПУТИ'; main = '—'; sub = 'рельсы и стены не распознаны — проверьте установку лидара';
+  } else if (finite(view.uncertainFrom)) {
+    main = `с ${fmt(view.uncertainFrom)} м`; sub = 'Оценка дальней оси пути требует уточнения';
+  } else if (area.held) {
+    main = `${fmt(area.measured)} м`; sub = 'Свежие измерения до этой отметки; часть габарита продолжена по истории';
+  } else if (view.kind !== 'ok') {
+    main = '—'; sub = 'Данных недостаточно для вывода о свободном пути';
   }
   card.className = `status-card ${cls}`;
   $('statusLabel').textContent = label; $('statusMain').textContent = main; $('statusSub').textContent = sub;
   const note = $('statusNote');
   const notes = [];
+  if (finite(m.track?.uncertain_from)) notes.push(`Ось пути неуверенна с ${fmt(m.track.uncertain_from)} м`);
   if (m.envelope_held) notes.push(`Габарит удержан по предыдущим кадрам (${m.envelope_coasted_frames}); текущие измерения — до ${fmt(m.observed_until_m, 0)} м`);
   if (m.turnout_ahead_m) notes.push(`Стрелка через ${fmt(m.turnout_ahead_m, 0)} м: маршрут за ней не определён`);
   note.classList.toggle('hidden', !notes.length); note.textContent = notes.join('. ');
   vp.classList.toggle('alarm', m.status === 'OBSTACLE');
   vp.classList.toggle('check', m.status === 'CHECK');
   $('mSpeed').textContent = fmt(m.speed_kmh, 0);
-  $('mFree').textContent = fmt(m.free_distance_m, 0);
+  $('mFree').textContent = finite(view.uncertainFrom) ? '—' : fmt(m.free_distance_m, 0);
+  $('mFree').title = finite(view.uncertainFrom) ? 'Свободная дальность не подтверждена из-за неопределённой оси пути' : '';
   $('mEnvelope').textContent = fmt(m.envelope_until_m ?? m.observed_until_m, 0);
   $('mTtc').textContent = fmt(m.time_to_obstacle_s, 1);
-  const fps = state.fpsHist.length ? state.fpsHist.reduce((a, b) => a + b, 0) / state.fpsHist.length : null;
-  const ms = m.timing_ms.total;
+  $('coverageRange').textContent = `${fmt(area.range)} м`;
+  $('coverageFresh').style.width = `${100 * area.measured / area.range}%`;
+  $('coverageHeld').style.width = `${100 * area.envelope / area.range}%`;
+  $('coverageDetail').textContent = `Измерено ${fmt(area.measured)} м` + (area.held ? ` · удержано до ${fmt(area.envelope)} м` : '')
+    + ` · далее нет наблюдения`;
+  const fps = state.fpsHist.length ? 1000 * state.fpsHist.length / state.fpsHist.reduce((a, b) => a + b, 0) : null;
+  const ms = m.timing_ms?.total;
   $('sysInfo').textContent = `обработка ${fmt(ms, 0)} мс` + (state.playing || state.mode === 'live' ? ` · ${fmt(fps, 1)} кадр/с` : '');
   $('sysInfo').classList.toggle('slow', ms > 100);
   if (m.frames) $('frameLabel').textContent = `кадр ${m.frame + 1} / ${m.frames}`;
   $('timeLabel').textContent = m.bag_time_s !== undefined ? `${fmt(m.bag_time_s, 1)} с записи` : '';
   const cal = m.calibration || {};
-  $('calibBox').innerHTML = `<b>Самокалибровка по рельсам</b><br>высота лидара над головкой рельса: ${fmt(cal.height_m, 2)} м<br>тангаж ${fmt(cal.pitch_deg, 2)}°, крен ${fmt(cal.roll_deg, 2)}°<br>измерения до ${fmt(m.observed_until_m, 0)} м, габарит до ${fmt(m.envelope_until_m ?? m.observed_until_m, 0)} м<br>рельсы — до ${fmt(m.track.rail_until, 0)} м · фильтр убрал ${fmt((m.points || {}).filtered || 0)} изолированных возвратов`;
+  $('calibBox').innerHTML = `<b>${cal.valid ? 'Самокалибровка по рельсам' : 'Начальная установка · калибровка не подтверждена'}</b><br>высота лидара над головкой рельса: ${fmt(cal.height_m, 2)} м<br>тангаж ${fmt(cal.pitch_deg, 2)}°, крен ${fmt(cal.roll_deg, 2)}°<br>измерения до ${fmt(area.measured)} м, габарит до ${fmt(area.envelope)} м<br>рельсы — до ${fmt(m.track?.rail_until)} м · фильтр убрал ${fmt((m.points || {}).filtered || 0)} изолированных возвратов`;
 }
 
 function obKind(o) {
@@ -214,13 +291,21 @@ function obKind(o) {
 function renderObstacles(m) {
   const all = [...m.obstacles.map((o) => ({ ...o, conf: true })), ...m.pending.map((o) => ({ ...o, conf: false }))];
   $('obstacles').innerHTML = all.slice(0, 5).map((o) => {
-    return `<div class="ob ${o.conf ? '' : 'pending'} ${o.low ? 'low' : ''}" data-id="${o.track_id}">
+    const confidence = finite(o.confidence) ? clamp(o.confidence, 0, 1) : null;
+    return `<button type="button" class="ob ${o.conf ? '' : 'pending'} ${o.low ? 'low' : ''} ${state.selectedObstacle === o.track_id ? 'selected' : ''}" data-id="${o.track_id}" title="Показать объект №${o.track_id} в 3D" aria-pressed="${state.selectedObstacle === o.track_id}">
       <div class="ob-top"><span class="ob-dist">${fmt(o.distance_m, 1)} м</span><span class="ob-kind">${o.conf ? 'подтверждено' : 'проверка'} · №${o.track_id}</span></div>
       <div class="ob-info">${obKind(o)} · смещение ${fmt(o.lateral_m, 2)} м · высота ${fmt(o.box.h[0], 2)}–${fmt(o.box.h[1], 2)} м</div>
-      <div class="ob-info">${o.points} точек на ${o.rings} лучах · обнаружен с ${fmt(o.first_seen_m, 0)} м · уверенность ${fmt(o.confidence * 100, 0)}%</div>
-      </div>`;
+      <div class="ob-info">${o.points} точек · ${o.rings} лучей · замечен с ${fmt(o.first_seen_m)} м</div>
+      <div class="ob-confidence" title="Оценка устойчивости сопровождения, не вероятность класса"><span>Сопровождение ${fmt(confidence === null ? null : confidence * 100)}%</span><span>${o.missed ? 'удержан по истории' : 'виден в этом кадре'}</span></div>
+      <div class="confidence-track"><i style="width:${confidence === null ? 0 : confidence * 100}%"></i></div>
+      </button>`;
   }).join('');
-  $('obstacles').querySelectorAll('.ob').forEach((el) => el.onclick = () => { setCam('target'); });
+  if (!all.length) $('obstacles').innerHTML = '<div class="empty-objects">Подтверждённых объектов и кандидатов нет</div>';
+  $('obstacles').querySelectorAll('.ob').forEach((el) => el.onclick = () => {
+    state.selectedObstacle = Number(el.dataset.id);
+    scene.focusObstacle(state.selectedObstacle);
+    syncCam('target'); renderObstacles(state.frame);
+  });
 }
 
 function renderSynthetic(m) {
@@ -254,10 +339,10 @@ function drawRadar(m) {
   const X = (s) => L + (R - L) * Math.min(Math.max(s, 0), maxS) / maxS;
   g.clearRect(0, 0, W, H);
   g.font = `${11 * k}px Segoe UI, sans-serif`;
-  const y0 = 30 * k, y1 = 58 * k;
+  const y0 = 34 * k, y1 = 62 * k;
   // corridor band: observed (solid) / not observed (hatched)
   const obs = m.observed_until_m || 0;
-  const col = m.status === 'OBSTACLE' ? 'rgba(239,68,68,' : m.status === 'CHECK' ? 'rgba(245,158,11,' : 'rgba(34,197,94,';
+  const col = decisionView(m).kind === 'bad' ? 'rgba(239,68,68,' : decisionView(m).kind === 'ok' ? 'rgba(34,197,94,' : 'rgba(245,158,11,';
   g.fillStyle = col + '0.20)'; g.fillRect(X(0), y0, X(obs) - X(0), y1 - y0);
   g.strokeStyle = col + '0.8)'; g.lineWidth = 1.5 * k; g.strokeRect(X(0), y0, X(obs) - X(0), y1 - y0);
   g.save(); g.beginPath(); g.rect(X(obs), y0, X(maxS) - X(obs), y1 - y0); g.clip();
@@ -269,12 +354,19 @@ function drawRadar(m) {
   [0.38, 0.62].forEach((f) => { const y = y0 + (y1 - y0) * f; g.beginPath(); g.moveTo(X(0), y); g.lineTo(X(maxS), y); g.stroke(); });
   g.globalAlpha = 1;
   // ticks
-  g.fillStyle = css('--muted'); g.textAlign = 'center';
-  for (let s = 0; s <= maxS; s += maxS > 250 ? 50 : 25) {
-    g.fillRect(X(s), y1, k, 5 * k);
-    g.fillText(`${s}`, X(s), y1 + 16 * k);
+  g.fillStyle = css('--muted');
+  const tickStep = maxS > 250 ? 50 : 25;
+  const ticks = Array.from({ length: Math.floor(maxS / tickStep) + 1 }, (_, index) => index * tickStep);
+  if (ticks[ticks.length - 1] !== maxS) {
+    if (maxS - ticks[ticks.length - 1] < tickStep * .55) ticks.pop();
+    ticks.push(maxS);
   }
-  g.textAlign = 'left'; g.fillText('м', R + 4 * k, y1 + 16 * k);
+  for (const s of ticks) {
+    g.fillRect(X(s), y1, k, 5 * k);
+    g.textAlign = s === maxS ? 'right' : s === 0 ? 'left' : 'center';
+    g.fillText(s === maxS ? `${s} м` : `${s}`, X(s), y1 + 16 * k);
+  }
+  g.textAlign = 'left';
   // train
   g.fillStyle = '#3b82f6'; g.fillRect(L - 30 * k, y0 + 4 * k, 26 * k, y1 - y0 - 8 * k);
   // objects
@@ -288,7 +380,7 @@ function drawRadar(m) {
     g.font = `${11 * k}px Segoe UI, sans-serif`;
   });
   g.fillStyle = css('--muted'); g.font = `${11 * k}px Segoe UI, sans-serif`;
-  g.fillText('схема пути · заливка — проверенный участок', 12 * k, 16 * k);
+  g.fillText('схема пути · заливка — текущие измерения', 12 * k, 12 * k);
   void tr;
 }
 
@@ -319,29 +411,48 @@ function drawTimeline() {
     g.fillStyle = css('--text'); g.fillRect(x - k, 0, 2 * k, H - 12 * k);
   }
   g.fillStyle = css('--muted'); g.font = `${10 * k}px Segoe UI, sans-serif`;
-  g.fillText(state.mode === 'live' ? 'последние 60 с · статус по кадрам · голубая линия — скорость (км/ч)'
+  g.fillText(state.mode === 'live' ? 'последние 600 полученных кадров · голубая линия — скорость (км/ч)'
     : 'статус по кадрам · голубая линия — скорость (км/ч)', 4 * k, H - 2 * k);
 }
 $('timeline').onclick = (e) => {
   if (state.mode !== 'playback' || !state.frames) return;
   const r = e.target.getBoundingClientRect();
-  const i = Math.floor((e.clientX - r.left) / r.width * state.frames);
+  const i = clamp(Math.floor((e.clientX - r.left) / r.width * state.frames), 0, state.frames - 1);
   send({ cmd: 'seek', index: i });
 };
 
 function renderEvents() {
   const ev = new Map();
   state.timeline.forEach((it) => { if (it && it.ids) it.ids.forEach((id) => { if (!ev.has(id)) ev.set(id, it); }); });
-  $('tlEvents').innerHTML = [...ev.entries()].map(([id, it]) => `<span class="tl-chip" data-i="${it.i}">кадр ${it.i}: ${fmt(it.dist, 0)} м</span>`).join('') || '<span class="scan-state">событий нет</span>';
+  // Like Sakhalin Ai's event review, use actual buttons with a frame label and
+  // an accessible target. The server's detections determine these markers.
+  $('tlEvents').innerHTML = [...ev.entries()].map(([id, it]) => `<button type="button" class="tl-chip" data-i="${it.i}" aria-label="Событие №${id}, кадр ${it.i + 1}, ${fmt(it.dist)} метров">кадр ${it.i + 1}: ${fmt(it.dist)} м</button>`).join('') || '<span class="scan-state">событий пока нет</span>';
   $('tlEvents').querySelectorAll('.tl-chip').forEach((c) => c.onclick = () => send({ cmd: 'seek', index: Math.max(0, Number(c.dataset.i) - 2) }));
 }
+function seekEvent(direction) {
+  if (state.mode !== 'playback' || !state.frames) return;
+  const starts = [];
+  let previous = false;
+  state.timeline.forEach((item, index) => {
+    const alarm = item?.status === 'OBSTACLE';
+    if (alarm && !previous) starts.push(index);
+    previous = alarm;
+  });
+  const current = state.frame?.frame ?? -1;
+  const next = direction > 0 ? starts.find((index) => index > current) : starts.filter((index) => index < current).pop();
+  if (next === undefined) { notify(direction > 0 ? 'Дальше нет известных событий. Выполните анализ проезда.' : 'Предыдущих известных событий нет.'); return; }
+  send({ cmd: 'seek', index: next });
+}
+$('previousEvent').onclick = () => seekEvent(-1);
+$('nextEvent').onclick = () => seekEvent(1);
 
 // ------------------------------------------------------------------ perf
-function renderPerf(m) {
+function renderPerf(m, record = true) {
   const t = m.timing_ms;
-  const rows = [['decode', 'Преобразование облака'], ['track', 'Калибровка и путь'], ['egomotion', 'Эго-движение'], ['filter', 'Фильтр'], ['detect', 'Кандидаты'], ['tracking', 'Треки'], ['total', 'Всего']];
+  const rows = [['decode', 'Преобразование облака'], ['track', 'Калибровка и путь'], ['egomotion', 'Эго-движение'], ['filter', 'Фильтр'], ['detect', 'Кандидаты'], ['tracking', 'Треки'],
+    ...[['neural_path', 'Доп. оценка оси'], ['learned_detection', 'Доп. поиск'], ['learned_tracking', 'Доп. сопровождение'], ['component_model', 'Оценка кластеров']].filter(([key]) => t[key] > 0), ['total', 'Всего']];
   $('perfBars').innerHTML = rows.map(([k, name]) => `<div class="perf-row"><span>${name}</span><div class="perf-bar"><i style="width:${Math.min(100, (t[k] || 0))}%;${k === 'total' ? 'background:' + ((t.total || 0) > 100 ? '#ef4444' : '#22c55e') : ''}"></i></div><span>${fmt(t[k], 1)} мс</span></div>`).join('');
-  state.perfHist.push(t.total || 0);
+  if (record && finite(t.total)) state.perfHist.push(t.total);
   if (state.perfHist.length > 150) state.perfHist.shift();
   const cv = $('perfChart'), g = cv.getContext('2d');
   const k = devicePixelRatio, W = cv.width = cv.clientWidth * k, H = cv.height = cv.clientHeight * k;
@@ -355,7 +466,11 @@ function renderPerf(m) {
 }
 
 // ------------------------------------------------------------------ controls
-function openBag(id) { send({ cmd: 'open', bag: id }); }
+function openBag(id) {
+  if (!send({ cmd: 'open', bag: id })) return;
+  clearFrame(); state.frames = 0; state.timeline = []; state.bag = state.bags.find((bag) => bag.id === id) || null;
+  drawTimeline(); $('tlEvents').replaceChildren(); $('scanState').textContent = '';
+}
 $('bagSelect').onchange = (e) => openBag(e.target.value);
 $('btnPlay').onclick = () => send({ cmd: state.playing ? 'pause' : 'play' });
 $('btnNext').onclick = () => send({ cmd: 'step', delta: 1 });
@@ -368,9 +483,14 @@ $('btnScan').onclick = () => {
 
 function setCam(mode) {
   scene.setCamera(mode);
+  syncCam(mode);
+}
+function syncCam(mode) {
   document.querySelectorAll('#cams button').forEach((b) => b.classList.toggle('active', b.dataset.cam === mode));
 }
-document.querySelectorAll('#cams button').forEach((b) => b.onclick = () => setCam(b.dataset.cam));
+scene.onCameraChange = syncCam;
+$('resetCamera').onclick = () => scene.resetCamera();
+document.querySelectorAll('#cams button[data-cam]').forEach((b) => b.onclick = () => setCam(b.dataset.cam));
 
 document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => {
   document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('active', x === b));
@@ -378,6 +498,16 @@ document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => {
 });
 
 document.querySelectorAll('[data-layer]').forEach((c) => c.onchange = () => scene.setLayer(c.dataset.layer, c.checked));
+function layerPreset(raw) {
+  const normal = new Set(['points', 'envelope', 'path', 'learned', 'markers', 'boxes']);
+  document.querySelectorAll('[data-layer]').forEach((input) => {
+    input.checked = raw ? input.dataset.layer === 'points' : normal.has(input.dataset.layer);
+    scene.setLayer(input.dataset.layer, input.checked);
+  });
+  if (raw) { $('colorMode').value = 'intensity'; scene.setColorMode('intensity'); }
+}
+$('rawOnly').onclick = () => layerPreset(true);
+$('defaultLayers').onclick = () => { layerPreset(false); $('colorMode').value = 'class'; scene.setColorMode('class'); };
 $('colorMode').onchange = (e) => scene.setColorMode(e.target.value);
 $('pointSize').oninput = (e) => scene.setPointSize(Number(e.target.value));
 
@@ -432,7 +562,7 @@ function applyTheme(t) {
   try { localStorage.setItem('gabarit-theme', t); } catch (e) { /* private mode */ }
   $('btnTheme').innerHTML = t === 'light' ? '&#9790;' : '&#9788;';
   scene.setTheme(t === 'light');
-  if (state.frame) { drawRadar(state.frame); renderPerf(state.frame); }
+  if (state.frame) { drawRadar(state.frame); renderPerf(state.frame, false); }
   drawTimeline();
 }
 $('btnTheme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
@@ -470,12 +600,14 @@ $('uploadInput').onchange = () => {
 };
 
 document.addEventListener('keydown', (e) => {
-  if (['INPUT', 'SELECT'].includes(document.activeElement.tagName)) return;
+  if (e.ctrlKey || e.altKey || e.metaKey || e.repeat || ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement.tagName)
+      || document.activeElement.isContentEditable || !$('modal').classList.contains('hidden')) return;
+  if (e.code === 'KeyR') { e.preventDefault(); scene.resetCamera(); }
   if (e.code === 'Space') { e.preventDefault(); $('btnPlay').click(); }
   else if (e.code === 'ArrowRight') $('btnNext').click();
   else if (e.code === 'ArrowLeft') $('btnPrev').click();
   else if (/^Digit[1-6]$/.test(e.code)) setCam(['cab', 'chase', 'top', 'side', 'target', 'free'][Number(e.code.slice(5)) - 1]);
 });
-window.addEventListener('resize', () => { if (state.frame) drawRadar(state.frame); drawTimeline(); });
+window.addEventListener('resize', () => { if (state.frame) { drawRadar(state.frame); renderPerf(state.frame, false); } drawTimeline(); });
 
 connect();

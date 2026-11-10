@@ -25,6 +25,7 @@ import logging
 import os
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -50,7 +51,19 @@ PROJECT = ROOT.parent
 
 
 def cfg_hash(cfg: Config) -> str:
-    return hashlib.sha1(json.dumps(cfg.to_dict(), sort_keys=True).encode()).hexdigest()[:10]
+    digest = hashlib.sha256(json.dumps(cfg.to_dict(), sort_keys=True).encode())
+    # Config alone cannot identify detector output after a source update.
+    for path in sorted((PROJECT / "gabarit").rglob("*.py")):
+        digest.update(path.relative_to(PROJECT).as_posix().encode())
+        digest.update(path.read_bytes())
+    if cfg.models.learned_path:
+        weights = Path(cfg.models.far_path_weights)
+        if not weights.is_absolute():
+            weights = PROJECT / weights
+        if weights.is_file():
+            stat = weights.stat()
+            digest.update(f"{weights.resolve()}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+    return digest.hexdigest()[:16]
 
 
 def sensor_profiles(cfg: Config) -> dict:
@@ -210,7 +223,8 @@ class App:
     async def _ws_live(self, ws: web.WebSocketResponse) -> web.WebSocketResponse:
         self.live.loop = asyncio.get_running_loop()
         self.live.clients.add(ws)
-        await ws.send_json({"type": "hello", "mode": "live"})
+        await ws.send_json({"type": "hello", "mode": "live", "config": self.base_cfg.to_dict(),
+                            "sensor_profiles": sensor_profiles(self.base_cfg)})
         if self.live.last:
             await ws.send_bytes(self.live.last)
         async for _ in ws:
@@ -236,7 +250,7 @@ class App:
 
         async def send_frame(sess: BagSession) -> dict | None:
             out = await loop.run_in_executor(self.pool, sess.step)
-            if out is None:
+            if out is None or state["session"] is not sess:
                 return None
             payload, meta = out
             async with send_lock:
@@ -265,7 +279,14 @@ class App:
                     period = 0.1 / speed
                     await asyncio.sleep(max(0.0, period - (time.perf_counter() - t0)))
             except (ConnectionError, RuntimeError) as err:  # client went away
+                state["playing"] = False
                 LOG.info("player stopped: %s", err)
+                await send_json({"type": "state", "playing": False})
+                await send_json({"type": "error", "message": f"Не удалось продолжить просмотр: {err}"})
+            except (OSError, ValueError, sqlite3.Error) as err:
+                state["playing"] = False
+                await send_json({"type": "state", "playing": False})
+                await send_json({"type": "error", "message": f"Ошибка чтения записи: {err}"})
 
         def stop_player() -> None:
             state["playing"] = False
@@ -281,9 +302,9 @@ class App:
             if info is None:
                 await send_json({"type": "error", "message": f"нет такой записи: {bag_id}"})
                 return
+            sess = await loop.run_in_executor(self.pool, BagSession, info, state["cfg"])
             if state["session"] is not None:
                 await loop.run_in_executor(self.pool, state["session"].close)
-            sess = BagSession(info, state["cfg"])
             state["session"] = sess
             await send_json({"type": "opened", "bag": info.public(), "frames": sess.frames})
             cached = load_cached_scan(self.cache, info, cfg_hash(state["cfg"]))
@@ -334,6 +355,9 @@ class App:
                     data = json.loads(msg.data)
                 except ValueError:
                     continue
+                if not isinstance(data, dict):
+                    await send_json({"type": "error", "message": "ожидается объект команды"})
+                    continue
                 cmd = data.get("cmd")
                 self.access.touch(ws)
                 sess: BagSession | None = state["session"]
@@ -346,9 +370,13 @@ class App:
                         stop_player()
                         await send_json({"type": "state", "playing": False})
                     elif cmd == "speed":
-                        state["speed"] = float(data.get("value", 1.0))
+                        speed = float(data.get("value", 1.0))
+                        if not 0.05 <= speed <= 5.0:
+                            raise ValueError("скорость просмотра должна быть от 0.05 до 5")
+                        state["speed"] = speed
                     elif cmd == "step" and sess is not None:
                         stop_player()
+                        await send_json({"type": "state", "playing": False})
                         target = sess.next_index - 1 + int(data.get("delta", 1))
                         if int(data.get("delta", 1)) != 1:
                             await loop.run_in_executor(self.pool, sess.seek, target)
@@ -362,13 +390,14 @@ class App:
                             state["playing"] = True
                             state["task"] = asyncio.ensure_future(player())
                     elif cmd == "add_obstacle" and sess is not None:
-                        ob = sess.add_obstacle(data.get("shape", "person"), float(data.get("s", 100)),
-                                               float(data.get("d", 0.0)), float(data.get("yaw_deg", 0.0)))
+                        ob = await loop.run_in_executor(self.pool, sess.add_obstacle, data.get("shape", "person"),
+                                                        float(data.get("s", 100)), float(data.get("d", 0.0)),
+                                                        float(data.get("yaw_deg", 0.0)))
                         await send_json({"type": "synthetic", "added": ob})
                         if not state["playing"]:
                             await send_frame(sess)
                     elif cmd == "clear_obstacles" and sess is not None:
-                        sess.clear_obstacles()
+                        await loop.run_in_executor(self.pool, sess.clear_obstacles)
                         await send_json({"type": "synthetic", "cleared": True})
                     elif cmd == "config":
                         state["scan_generation"] = state.get("scan_generation", 0) + 1
@@ -385,7 +414,7 @@ class App:
                         state["scan_generation"] = state.get("scan_generation", 0) + 1
                     elif cmd == "list":
                         await send_json({"type": "bags", "bags": self.bags_public()})
-                except (KeyError, ValueError, TypeError) as err:
+                except (KeyError, ValueError, TypeError, OSError, RuntimeError, sqlite3.Error) as err:
                     await send_json({"type": "error", "message": str(err)})
         finally:
             self.access.release(ws)

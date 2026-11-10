@@ -1,0 +1,6 @@
+# Optional Attention Please far-path branch. Sensor axes match provided Pandar bags.
+models:
+  learned_path: true
+  component_policy: score
+  device: auto
+  path_interval: 10

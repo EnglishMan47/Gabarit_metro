@@ -1,0 +1,20 @@
+# Use together with compose.yaml. Fetch weights before starting this profile.
+services:
+  gabarit:
+    image: gabarit:neural
+    build:
+      context: .
+      args:
+        WITH_NEURAL: "1"
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    environment:
+      GABARIT_CONFIG: /opt/gabarit/config/${GABARIT_CONFIG_FILE:-learned_pandar.yaml}
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+    volumes:
+      - type: bind
+        source: ./.models/attention_please
+        target: /opt/gabarit/.models/attention_please
+        read_only: true
+        bind:
+          create_host_path: false

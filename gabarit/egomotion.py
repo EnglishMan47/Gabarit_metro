@@ -141,6 +141,8 @@ def propagate_track(model: TrackModel, delta: float, sigma_growth: float = 0.03)
         out = TrackModel(**{**model.__dict__})
         out.sig_c = model.sig_c + sigma_growth * 0.3
         out.sig_z = model.sig_z + sigma_growth * 0.3
+        if model.sig_z_path is not None:
+            out.sig_z_path = model.sig_z_path + sigma_growth * 0.3
         return out
     th = np.gradient(c, s)
     ox = float(np.interp(delta, s, c) - np.interp(0.0, s, c, left=c[0]))
@@ -161,6 +163,8 @@ def propagate_track(model: TrackModel, delta: float, sigma_growth: float = 0.03)
     out.theta = np.gradient(np.nan_to_num(out.c), grid)
     out.sig_c = np.interp(grid, f_new[ok], model.sig_c[ok]) + sigma_growth
     out.sig_z = np.interp(grid, f_new[ok], model.sig_z[ok]) + sigma_growth
+    if model.sig_z_path is not None:
+        out.sig_z_path = np.interp(grid, f_new[ok], model.sig_z_path[ok]) + sigma_growth
     # A retained horizon travels towards the train as well. Leaving the old
     # distances here would extend an unobserved corridor on every dropout.
     out.observed_until = max(float(grid[0]), model.observed_until - delta)

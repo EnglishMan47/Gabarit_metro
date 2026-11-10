@@ -93,3 +93,8 @@ tracking:
   far_confirm_window: 8
   far_lateral_std: 0.3
   max_speed: 25.0
+models:
+  component_policy: score
+  component_min_score: 0.9
+  component_min_hits: 3
+  learned_path: false

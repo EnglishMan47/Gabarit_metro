@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import math
 import struct
+import hashlib
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -60,6 +62,23 @@ def pack_frame(res: FrameResult, meta: dict[str, Any]) -> bytes:
         "coasted_frames": tr.coast_frames,
         "rail_until": round(tr.rail_until, 1),
     }
+    # Distinguish measured range from precision of the fitted axis. These
+    # display diagnostics never change detections or declare space clear.
+    uncertainty = np.zeros(len(tr.s), bool)
+    for name, limit in (("sig_c", meta.get("path_lateral_limit_m", 0.3)), ("sig_z", 0.2)):
+        values = getattr(tr, name, None)
+        if values is not None:
+            values = np.asarray(values)
+            meta["track"][name] = [round(float(v), 3) if np.isfinite(v) else None for v in values[::step]]
+            if name == "sig_z" and getattr(tr, "sig_z_path", None) is not None:
+                # Ground-return noise sets clearance above the floor; total
+                # height-path uncertainty describes confidence of the axis.
+                values = np.asarray(tr.sig_z_path)
+                meta["track"]["sig_z_path"] = [round(float(v), 3) if np.isfinite(v) else None for v in values[::step]]
+            uncertainty |= ~np.isfinite(values) | (values > limit)
+    fresh = meta["track"]["current_observed_until"]
+    uncertain = np.asarray(tr.s)[uncertainty & (tr.s <= fresh)]
+    meta["track"]["uncertain_from"] = round(float(uncertain[0]), 2) if len(uncertain) else None
     body = json.dumps(meta, ensure_ascii=False, default=_json_default).encode("utf-8")
     pad = (-len(body)) % 4
     header = MAGIC + struct.pack("<I", len(body) + pad) + body + b" " * pad
@@ -213,11 +232,29 @@ def scan_bag(info: BagInfo, cfg: Config, progress=None, stop_flag=None) -> list[
     return out
 
 
+def _scan_cache_path(cache: Path, info: BagInfo, cfg_hash: str) -> Path:
+    sources = []
+    for path in info.storage_paths or (info.path,):
+        path = Path(path)
+        stat = path.stat()
+        sources.append((str(path.resolve()), stat.st_size, stat.st_mtime_ns))
+    identity = (info.id, info.topic, info.topic_id, info.frame_count, info.start_ns,
+                info.end_ns, sources, cfg_hash)
+    digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:24]
+    return cache / f"scan-v2-{digest}.json"
+
+
 def load_cached_scan(cache: Path, info: BagInfo, cfg_hash: str) -> list[dict] | None:
-    p = cache / f"{info.name}-{cfg_hash}.json"
+    try:
+        p = _scan_cache_path(cache, info, cfg_hash)
+    except OSError:
+        return None
     if p.exists():
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            items = json.loads(p.read_text(encoding="utf-8"))
+            if (isinstance(items, list) and len(items) == info.frame_count and
+                    all(isinstance(item, dict) and item.get("i") == i for i, item in enumerate(items))):
+                return items
         except (OSError, ValueError):
             return None
     return None
@@ -225,4 +262,14 @@ def load_cached_scan(cache: Path, info: BagInfo, cfg_hash: str) -> list[dict] | 
 
 def save_cached_scan(cache: Path, info: BagInfo, cfg_hash: str, items: list[dict]) -> None:
     cache.mkdir(parents=True, exist_ok=True)
-    (cache / f"{info.name}-{cfg_hash}.json").write_text(json.dumps(items), encoding="utf-8")
+    target = _scan_cache_path(cache, info, cfg_hash)
+    # A reader must not see a half-written timeline from another scan worker.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=cache, suffix=".tmp", delete=False) as out:
+            temporary = Path(out.name)
+            json.dump(items, out, allow_nan=False)
+        temporary.replace(target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

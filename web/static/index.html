@@ -43,6 +43,8 @@
 <main class="layout">
   <section class="viewport" id="viewport">
     <canvas id="scene"></canvas>
+    <div id="streamState" class="stream-state wait" role="status">Подключение…</div>
+    <div id="notice" class="notice hidden" role="alert"><span id="noticeText"></span><button id="noticeClose" aria-label="Закрыть сообщение">×</button></div>
     <div class="cams" id="cams">
       <button data-cam="cab" class="active" title="Вид из кабины (1)">Кабина</button>
       <button data-cam="chase" title="Сзади сверху (2)">Сзади</button>
@@ -50,6 +52,7 @@
       <button data-cam="side" title="Вид сбоку (4)">Сбоку</button>
       <button data-cam="target" title="К препятствию (5)">К цели</button>
       <button data-cam="free" title="Свободная камера (мышь)">Свободно</button>
+      <button id="resetCamera" title="Сбросить положение камеры (R)" aria-label="Сбросить камеру">↺</button>
     </div>
     <div class="legend">
       <span><i style="background:var(--pt-other)"></i>тоннель</span>
@@ -68,6 +71,11 @@
       <div class="status-main" id="statusMain">—</div>
       <div class="status-sub" id="statusSub">выберите запись и нажмите ▶</div>
       <div class="status-note hidden" id="statusNote"></div>
+    </div>
+    <div class="coverage-card" aria-label="Дальность наблюдения">
+      <div class="coverage-title"><span>Область наблюдения</span><b id="coverageRange">—</b></div>
+      <div class="coverage-track"><i id="coverageHeld" class="coverage-held"></i><i id="coverageFresh" class="coverage-fresh"></i></div>
+      <div class="coverage-detail" id="coverageDetail">Нет измерений</div>
     </div>
     <div class="metrics">
       <div class="metric"><span class="m-val" id="mSpeed">—</span><span class="m-lab">скорость, км/ч</span></div>
@@ -118,9 +126,11 @@
     </div>
 
     <div class="tab hidden" id="tab-layers">
+      <div class="row"><button id="rawOnly">Чистое облако</button><button id="defaultLayers">Основные слои</button></div>
       <label class="check"><input type="checkbox" data-layer="points" checked> Облако точек</label>
       <label class="check"><input type="checkbox" data-layer="envelope" checked> Габарит (коридор)</label>
       <label class="check"><input type="checkbox" data-layer="path" checked> Ось пути и рельсы</label>
+      <label class="check"><input type="checkbox" data-layer="learned" checked> Дополнительная оценка оси</label>
       <label class="check"><input type="checkbox" data-layer="walls"> Отслеживаемые стены</label>
       <label class="check"><input type="checkbox" data-layer="markers" checked> Отметки дальности</label>
       <label class="check"><input type="checkbox" data-layer="boxes" checked> Рамки объектов</label>
@@ -134,6 +144,7 @@
       </label>
       <label>Размер точек <input type="range" id="pointSize" min="1" max="5" step="0.5" value="2"></label>
       <label class="check"><input type="checkbox" id="soundOn"> Звуковой сигнал тревоги</label>
+      <p class="hint">Мышь — вращение, колесо — масштаб. Клавиши 1–6 — виды, R — вернуть камеру. Нажмите карточку объекта, чтобы приблизить его.</p>
     </div>
 
     <div class="tab hidden" id="tab-params">
@@ -178,6 +189,7 @@
     <div class="tl-events" id="tlEvents"></div>
   </div>
   <canvas id="timeline" class="timeline"></canvas>
+  <div class="timeline-nav"><button id="previousEvent" title="Перейти к предыдущему подтверждённому событию">← Событие</button><span id="timelineHint">Нажмите на ленту, чтобы перейти к кадру</span><button id="nextEvent" title="Перейти к следующему подтверждённому событию">Событие →</button></div>
 </footer>
 
 <div class="modal hidden" id="modal">

@@ -65,7 +65,7 @@ def run_bag(info, cfg: Config, step: int, stop: int | None, out_dir: Path | None
             slim = {k: d[k] for k in ("frame", "stamp", "status", "obstacle", "nearest_distance_m", "free_distance_m",
                                       "observed_until_m", "speed_kmh", "obstacles", "pending", "calibration")}
             for key in ("current_observed_until_m", "envelope_until_m", "envelope_held",
-                        "envelope_coasted_frames", "displacement_m", "ego_quality", "points", "realtime", "state_reset", "path_guard"):
+                        "envelope_coasted_frames", "displacement_m", "ego_quality", "points", "realtime", "state_reset", "path_guard", "models"):
                 if key in d:
                     slim[key] = d[key]
             slim["timing_ms"] = measured

@@ -5,3 +5,5 @@ docker/gabarit text eol=lf
 *.cmd text eol=crlf
 Dockerfile text eol=lf
 .gitattributes text eol=lf
+# Vendored weights/source are verified byte-for-byte against pinned upstream.
+gabarit/vendor/** -text

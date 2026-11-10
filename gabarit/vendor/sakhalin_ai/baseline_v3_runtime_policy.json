@@ -1,0 +1,1106 @@
+{
+  "format": "lidar-metro-runtime-policy-v1",
+  "name": "baseline_v3",
+  "version": "2026-09-27-submission",
+  "purpose": "HACKATHON_INTRUSION_CANDIDATE_RUNTIME_POLICY_NOT_A_SAFETY_CLEAR_DECISION",
+  "implementation": {
+    "type": "compiled_cpp_policy",
+    "core_files": [
+      "src/cpp/curve_envelope_core.cpp",
+      "src/cpp/curve_pipeline_stream_cli.cpp",
+      "src/lidar_mosmetro3d_cpp/src/curve_envelope_node.cpp"
+    ],
+    "default_runtime_modes": [
+      "direct_cpp",
+      "ros2"
+    ],
+    "runtime_parameter": {
+      "name": "noise_filter_mode",
+      "value": "baseline_v3"
+    }
+  },
+  "input_contract": {
+    "primary_input": "sensor_msgs/msg/PointCloud2 or decoded XYZ triplets",
+    "required_runtime_checks": [
+      "finite XYZ values",
+      "supported source_frame",
+      "actual PointCloud2 field offsets/datatypes/count/point_step/row_step",
+      "rail support found for selected frame"
+    ],
+    "unknown_policy": "UNKNOWN_OR_DEGRADED_IS_NOT_CLEAR"
+  },
+  "rail_axis": {
+    "selection_method": "development_candidate",
+    "search": {
+      "forward_min_m": 2.0,
+      "forward_max_m": 80.0,
+      "station_length_m": 2.0,
+      "cell_width_m": 0.04
+    },
+    "forward_extension": {
+      "method": "tangent",
+      "synthetic_extension": true,
+      "detection_range_claim": false
+    }
+  },
+  "train_envelope": {
+    "coordinate_contract": "source-axis frame derived from observed rail pairs",
+    "core_bounds_source_axis": {
+      "left_m": -1.4,
+      "right_m": 1.4,
+      "bottom_m": 0.0,
+      "top_m": 3.7
+    },
+    "margin_m": {
+      "left": 0.5,
+      "right": 0.5,
+      "bottom": 0.5,
+      "top": 0.5
+    },
+    "expanded_bounds_source_axis": {
+      "left_m": -1.9,
+      "right_m": 1.9,
+      "bottom_m": -0.5,
+      "top_m": 4.2
+    },
+    "calibration_status": "ENGINEERING_ASSUMPTION_NO_EXTERNAL_MOUNTING_CALIBRATION"
+  },
+  "component_extraction": {
+    "zone": "CORE",
+    "connectivity_radius_m": 0.25,
+    "features": [
+      "point_count",
+      "extent_x_m",
+      "extent_y_m",
+      "extent_z_m",
+      "volume_m3",
+      "density_points_per_m3",
+      "centroid_distance_m",
+      "nearest_distance_m"
+    ]
+  },
+  "decision_policy": {
+    "order": [
+      "boundary_warning",
+      "strong_geometry_obstacle",
+      "baseline_v3_assist_score",
+      "unknown_or_ignored"
+    ],
+    "boundary_warning": {
+      "min_points": 250,
+      "rules": [
+        {
+          "name": "left_edge_vertical_boundary",
+          "all": [
+            "centroid_x < -1.30",
+            "extent_x < 0.25",
+            "extent_z > 1.50"
+          ],
+          "output": "OBSERVED_BOUNDARY_WARNING_NOT_OBSTACLE"
+        },
+        {
+          "name": "upper_large_boundary",
+          "all": [
+            "centroid_z > 1.00",
+            "extent_x > 1.00",
+            "extent_y > 1.00",
+            "extent_z > 0.30"
+          ],
+          "output": "OBSERVED_BOUNDARY_WARNING_NOT_OBSTACLE"
+        }
+      ]
+    },
+    "strong_geometry_obstacle": {
+      "min_points": 1000,
+      "requires": [
+        "not boundary_warning"
+      ],
+      "output": "BASELINE_V3_CONFIRMED_INTRUSION_CANDIDATE"
+    },
+    "model_assist": {
+      "score_name": "baseline_v3_assist_score",
+      "threshold": 0.8064516129032258,
+      "applies_when": [
+        "not boundary_warning",
+        "component.point_count < 1000"
+      ],
+      "frame_output": "BASELINE_V3_MODEL_ASSIST_WAITING_FOR_TEMPORAL_CONFIRMATION",
+      "temporal_confirmation": {
+        "direct_cpp": {
+          "rule": "current model-assist alarm and previous frame model-assist alarm",
+          "consecutive_alarm_frames_required": 2
+        },
+        "ros2": {
+          "rule": "frame-level model-assist candidate is exposed; stream-level temporal confirmation is conservative and does not permit safety clear"
+        }
+      }
+    },
+    "unknown_or_ignored": {
+      "if_raw_core_without_reportable_candidate": "BASELINE_V3_WEAK_OR_UNCONFIRMED_CORE_UNKNOWN_NOT_CLEAR",
+      "if_no_supported_result": "UNKNOWN",
+      "safety_decision_permitted": false
+    }
+  },
+  "outputs": {
+    "primary_json_fields": [
+      "intrusion_candidate_present",
+      "nearest_reportable_intrusion_distance_from_source_origin_m",
+      "status",
+      "reason",
+      "system_status",
+      "safety_decision_permitted",
+      "baseline_v3_geometry_obstacle_count",
+      "baseline_v3_boundary_warning_count",
+      "baseline_v3_model_assist_count"
+    ],
+    "distance_contract": "distance is from source coordinate origin, not from train nose"
+  },
+  "known_limits": [
+    "not production-certified",
+    "no CLEAR decision",
+    "no external mounting calibration",
+    "no TF/IMU/odometry/map dependency in MVP",
+    "80m is geometry extension parameter, not measured detection range",
+    "baseline_v3_assist_score is internal to the baseline_v3 runtime policy"
+  ],
+  "assist_score_model": {
+    "format": "lidar-component-noise-forest-lite-v1",
+    "name": "baseline_v3_assist_score",
+    "purpose": "INTERNAL_BASELINE_V3_WEAK_COMPONENT_ASSIST_SCORE_NOT_A_SAFETY_OR_CLEAR_DECISION",
+    "features": [
+      "point_count",
+      "extent_x_m",
+      "extent_y_m",
+      "extent_z_m",
+      "volume_m3",
+      "density_points_per_m3",
+      "centroid_distance_m",
+      "nearest_distance_m"
+    ],
+    "aggregation": "mean_tree_probability",
+    "trees": [
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "volume_m3",
+        "feature_index": 4,
+        "threshold": 0.2405722239418025,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.4024038461538448
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.09759615384615355,
+          "feature": "volume_m3",
+          "feature_index": 4,
+          "threshold": 0.9907583315279664,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.03894230769230761,
+            "feature": "centroid_distance_m",
+            "feature_index": 6,
+            "threshold": 55.01949697297884,
+            "left": {
+              "positive_weight": 0,
+              "negative_weight": 0.024999999999999967
+            },
+            "right": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0.013942307692307693,
+              "feature": "centroid_distance_m",
+              "feature_index": 6,
+              "threshold": 56.63588575146686,
+              "left": {
+                "positive_weight": 0.5000000000000004,
+                "negative_weight": 0.0033653846153846156
+              },
+              "right": {
+                "positive_weight": 0,
+                "negative_weight": 0.010576923076923078
+              }
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.058653846153846
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_x_m",
+        "feature_index": 1,
+        "threshold": 0.6437655687332153,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.45624999999999843
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.0437499999999999,
+          "feature": "volume_m3",
+          "feature_index": 4,
+          "threshold": 1.0390564421527346,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.0057692307692307696,
+            "feature": "centroid_distance_m",
+            "feature_index": 6,
+            "threshold": 56.6599008795766,
+            "left": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0.0014423076923076924,
+              "feature": "volume_m3",
+              "feature_index": 4,
+              "threshold": 0.9111674548513701,
+              "left": {
+                "positive_weight": 0.48076923076923117,
+                "negative_weight": 0
+              },
+              "right": {
+                "positive_weight": 0.019230769230769232,
+                "negative_weight": 0.0014423076923076924
+              }
+            },
+            "right": {
+              "positive_weight": 0,
+              "negative_weight": 0.004326923076923077
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.03798076923076915
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_z_m",
+        "feature_index": 3,
+        "threshold": 0.6194828152656555,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.41346153846153705
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.08653846153846129,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.6678162664175034,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.002403846153846154,
+            "feature": "point_count",
+            "feature_index": 0,
+            "threshold": 108.5,
+            "left": {
+              "positive_weight": 0.009615384615384616,
+              "negative_weight": 0.0019230769230769232
+            },
+            "right": {
+              "positive_weight": 0.4903846153846158,
+              "negative_weight": 0.0004807692307692308,
+              "feature": "centroid_distance_m",
+              "feature_index": 6,
+              "threshold": 55.817378043813974,
+              "left": {
+                "positive_weight": 0.038461538461538464,
+                "negative_weight": 0.0004807692307692308
+              },
+              "right": {
+                "positive_weight": 0.45192307692307726,
+                "negative_weight": 0
+              }
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.08413461538461514
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_x_m",
+        "feature_index": 1,
+        "threshold": 0.622673511505127,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.4504807692307677
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.04951923076923065,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.9294230937957764,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.0033653846153846156,
+            "feature": "point_count",
+            "feature_index": 0,
+            "threshold": 74.0,
+            "left": {
+              "positive_weight": 0,
+              "negative_weight": 0.0028846153846153848
+            },
+            "right": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0.0004807692307692308,
+              "feature": "point_count",
+              "feature_index": 0,
+              "threshold": 112.5,
+              "left": {
+                "positive_weight": 0.038461538461538464,
+                "negative_weight": 0.0004807692307692308
+              },
+              "right": {
+                "positive_weight": 0.4615384615384619,
+                "negative_weight": 0
+              }
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.046153846153846045
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_z_m",
+        "feature_index": 3,
+        "threshold": 0.4982905387878418,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.4139423076923063
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.08605769230769206,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.468310983851552,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.002403846153846154,
+            "feature": "volume_m3",
+            "feature_index": 4,
+            "threshold": 0.20042878722145585,
+            "left": {
+              "positive_weight": 0,
+              "negative_weight": 0.002403846153846154
+            },
+            "right": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.08365384615384591
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_x_m",
+        "feature_index": 1,
+        "threshold": 0.6398306488990784,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.46298076923076764
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.03701923076923069,
+          "feature": "volume_m3",
+          "feature_index": 4,
+          "threshold": 0.9457188795725657,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.0028846153846153848,
+            "feature": "extent_y_m",
+            "feature_index": 2,
+            "threshold": 0.3184776306152344,
+            "left": {
+              "positive_weight": 0,
+              "negative_weight": 0.0028846153846153848
+            },
+            "right": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.03413461538461532
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_x_m",
+        "feature_index": 1,
+        "threshold": 0.6522598266601562,
+        "left": {
+          "positive_weight": 0.009615384615384616,
+          "negative_weight": 0.4610576923076907,
+          "feature": "extent_x_m",
+          "feature_index": 1,
+          "threshold": 0.6370984315872192,
+          "left": {
+            "positive_weight": 0,
+            "negative_weight": 0.4504807692307677
+          },
+          "right": {
+            "positive_weight": 0.009615384615384616,
+            "negative_weight": 0.010576923076923078,
+            "feature": "extent_y_m",
+            "feature_index": 2,
+            "threshold": 0.5053234100341797,
+            "left": {
+              "positive_weight": 0.009615384615384616,
+              "negative_weight": 0.0019230769230769232
+            },
+            "right": {
+              "positive_weight": 0,
+              "negative_weight": 0.008653846153846154
+            }
+          }
+        },
+        "right": {
+          "positive_weight": 0.4903846153846158,
+          "negative_weight": 0.03894230769230761,
+          "feature": "point_count",
+          "feature_index": 0,
+          "threshold": 171.5,
+          "left": {
+            "positive_weight": 0.4903846153846158,
+            "negative_weight": 0.031249999999999944,
+            "feature": "point_count",
+            "feature_index": 0,
+            "threshold": 111.0,
+            "left": {
+              "positive_weight": 0.009615384615384616,
+              "negative_weight": 0.007692307692307693,
+              "feature": "point_count",
+              "feature_index": 0,
+              "threshold": 105.5,
+              "left": {
+                "positive_weight": 0.009615384615384616,
+                "negative_weight": 0.0019230769230769232
+              },
+              "right": {
+                "positive_weight": 0,
+                "negative_weight": 0.0057692307692307696
+              }
+            },
+            "right": {
+              "positive_weight": 0.48076923076923117,
+              "negative_weight": 0.02355769230769228,
+              "feature": "extent_y_m",
+              "feature_index": 2,
+              "threshold": 0.46001434326171875,
+              "left": {
+                "positive_weight": 0.326923076923077,
+                "negative_weight": 0.0019230769230769232
+              },
+              "right": {
+                "positive_weight": 0.1538461538461538,
+                "negative_weight": 0.021634615384615363
+              }
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.007692307692307693
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_z_m",
+        "feature_index": 3,
+        "threshold": 0.4359230697154999,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.4163461538461524
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.08365384615384591,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.824202761054039,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.0125,
+            "feature": "extent_z_m",
+            "feature_index": 3,
+            "threshold": 0.6740297079086304,
+            "left": {
+              "positive_weight": 0,
+              "negative_weight": 0.008173076923076924
+            },
+            "right": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0.004326923076923077,
+              "feature": "extent_y_m",
+              "feature_index": 2,
+              "threshold": 0.31877899169921875,
+              "left": {
+                "positive_weight": 0,
+                "negative_weight": 0.0028846153846153848
+              },
+              "right": {
+                "positive_weight": 0.5000000000000004,
+                "negative_weight": 0.0014423076923076924
+              }
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.07115384615384596
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_z_m",
+        "feature_index": 3,
+        "threshold": 0.43389829993247986,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.40192307692307555
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.09807692307692278,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.9438272640109062,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.014423076923076924,
+            "feature": "extent_y_m",
+            "feature_index": 2,
+            "threshold": 0.9589977264404297,
+            "left": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0.004326923076923077,
+              "feature": "point_count",
+              "feature_index": 0,
+              "threshold": 81.0,
+              "left": {
+                "positive_weight": 0,
+                "negative_weight": 0.0038461538461538464
+              },
+              "right": {
+                "positive_weight": 0.5000000000000004,
+                "negative_weight": 0.0004807692307692308
+              }
+            },
+            "right": {
+              "positive_weight": 0,
+              "negative_weight": 0.010096153846153847
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.08365384615384591
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_z_m",
+        "feature_index": 3,
+        "threshold": 0.47281622886657715,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.41346153846153705
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.08653846153846129,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.3727716524153948,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.006730769230769231,
+            "feature": "point_count",
+            "feature_index": 0,
+            "threshold": 81.0,
+            "left": {
+              "positive_weight": 0,
+              "negative_weight": 0.00625
+            },
+            "right": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0.0004807692307692308,
+              "feature": "extent_z_m",
+              "feature_index": 3,
+              "threshold": 0.8608027100563049,
+              "left": {
+                "positive_weight": 0.038461538461538464,
+                "negative_weight": 0.0004807692307692308
+              },
+              "right": {
+                "positive_weight": 0.4615384615384619,
+                "negative_weight": 0
+              }
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.07980769230769208
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "density_points_per_m3",
+        "feature_index": 5,
+        "threshold": 394.06683227881535,
+        "left": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.08942307692307666,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.9075610265135765,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.011057692307692308,
+            "feature": "centroid_distance_m",
+            "feature_index": 6,
+            "threshold": 59.69497401630437,
+            "left": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0.005288461538461539,
+              "feature": "centroid_distance_m",
+              "feature_index": 6,
+              "threshold": 53.078439118596876,
+              "left": {
+                "positive_weight": 0,
+                "negative_weight": 0.005288461538461539
+              },
+              "right": {
+                "positive_weight": 0.5000000000000004,
+                "negative_weight": 0
+              }
+            },
+            "right": {
+              "positive_weight": 0,
+              "negative_weight": 0.0057692307692307696
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.07836538461538439
+          }
+        },
+        "right": {
+          "positive_weight": 0,
+          "negative_weight": 0.4105769230769217
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_z_m",
+        "feature_index": 3,
+        "threshold": 0.5187225341796875,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.4158653846153832
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.08413461538461514,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.8108683973550797,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.004807692307692308,
+            "feature": "volume_m3",
+            "feature_index": 4,
+            "threshold": 0.2585616946025966,
+            "left": {
+              "positive_weight": 0,
+              "negative_weight": 0.0033653846153846156
+            },
+            "right": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0.0014423076923076924,
+              "feature": "extent_z_m",
+              "feature_index": 3,
+              "threshold": 1.5080595016479492,
+              "left": {
+                "positive_weight": 0.48076923076923117,
+                "negative_weight": 0
+              },
+              "right": {
+                "positive_weight": 0.019230769230769232,
+                "negative_weight": 0.0014423076923076924
+              }
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.07932692307692285
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_x_m",
+        "feature_index": 1,
+        "threshold": 0.6346885561943054,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.44519230769230617
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.05480769230769217,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.5284046977758408,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.0009615384615384616,
+            "feature": "point_count",
+            "feature_index": 0,
+            "threshold": 112.5,
+            "left": {
+              "positive_weight": 0.028846153846153848,
+              "negative_weight": 0.0009615384615384616
+            },
+            "right": {
+              "positive_weight": 0.47115384615384653,
+              "negative_weight": 0
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.05384615384615371
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_x_m",
+        "feature_index": 1,
+        "threshold": 0.6429750919342041,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.4543269230769215
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.045673076923076816,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.88625830411911,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.0033653846153846156,
+            "feature": "nearest_distance_m",
+            "feature_index": 7,
+            "threshold": 63.12400375945536,
+            "left": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0
+            },
+            "right": {
+              "positive_weight": 0,
+              "negative_weight": 0.0033653846153846156
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.04230769230769221
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_z_m",
+        "feature_index": 3,
+        "threshold": 0.4476653039455414,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.4096153846153832
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.09038461538461512,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.9438272640109062,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.011538461538461539,
+            "feature": "extent_z_m",
+            "feature_index": 3,
+            "threshold": 0.6719245314598083,
+            "left": {
+              "positive_weight": 0,
+              "negative_weight": 0.007692307692307693
+            },
+            "right": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0.0038461538461538464,
+              "feature": "centroid_distance_m",
+              "feature_index": 6,
+              "threshold": 58.83718491916582,
+              "left": {
+                "positive_weight": 0.5000000000000004,
+                "negative_weight": 0.0014423076923076924
+              },
+              "right": {
+                "positive_weight": 0,
+                "negative_weight": 0.002403846153846154
+              }
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.07884615384615362
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_x_m",
+        "feature_index": 1,
+        "threshold": 0.6331295967102051,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.44903846153846
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.050961538461538336,
+          "feature": "volume_m3",
+          "feature_index": 4,
+          "threshold": 0.9557208457104812,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.005288461538461539,
+            "feature": "centroid_distance_m",
+            "feature_index": 6,
+            "threshold": 56.6599008795766,
+            "left": {
+              "positive_weight": 0.5000000000000004,
+              "negative_weight": 0
+            },
+            "right": {
+              "positive_weight": 0,
+              "negative_weight": 0.005288461538461539
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.045673076923076816
+          }
+        }
+      },
+      {
+        "positive_weight": 0.5000000000000004,
+        "negative_weight": 0.4999999999999983,
+        "feature": "extent_x_m",
+        "feature_index": 1,
+        "threshold": 0.6254016160964966,
+        "left": {
+          "positive_weight": 0,
+          "negative_weight": 0.4456730769230754
+        },
+        "right": {
+          "positive_weight": 0.5000000000000004,
+          "negative_weight": 0.05432692307692294,
+          "feature": "extent_z_m",
+          "feature_index": 3,
+          "threshold": 1.8499920666217804,
+          "left": {
+            "positive_weight": 0.5000000000000004,
+            "negative_weight": 0.0019230769230769232,
+            "feature": "point_count",
+            "feature_index": 0,
+            "threshold": 111.5,
+            "left": {
+              "positive_weight": 0.009615384615384616,
+              "negative_weight": 0.0019230769230769232
+            },
+            "right": {
+              "positive_weight": 0.4903846153846158,
+              "negative_weight": 0
+            }
+          },
+          "right": {
+            "positive_weight": 0,
+            "negative_weight": 0.05240384615384602
+          }
+        }
+      }
+    ],
+    "training_parameters": {
+      "candidate": "random_forest_lite",
+      "seed": 20260924,
+      "tree_count": 17,
+      "max_depth": 4,
+      "min_leaf": 5,
+      "feature_subset_size": "random randint(3, feature_count) per tree",
+      "bootstrap": "stratified positive bootstrap plus sampled negatives",
+      "negative_ratio": 20
+    },
+    "limitations": [
+      "ASSIST_SCORE_NEGATIVE_DOES_NOT_MEAN_CLEAR",
+      "UNKNOWN_REMAINS_UPSTREAM_STATUS_NOT_MODEL_CLEAR",
+      "INTERNAL_TO_BASELINE_V3_RUNTIME_POLICY"
+    ],
+    "threshold": 0.8064516129032258,
+    "temporal_rule": "same diagnostic frame-level 2-of-3 style as current README baseline: current alarm and adjacent alarm in the same source",
+    "training": {
+      "sources": [
+        "doubleT_obstacle"
+      ],
+      "component_count": 1373,
+      "class_counts": {
+        "true": 52,
+        "false": 1321
+      },
+      "mode": "hard_negative",
+      "positive_sources": [
+        "doubleT_obstacle"
+      ],
+      "hard_negative_sources": [
+        "doubleT_platform",
+        "new_data",
+        "roundT_doubleT",
+        "roundT_pressureGate_roundT",
+        "roundT_squareT_pressureGate_squareT",
+        "squareT_platform_squareT_switch"
+      ],
+      "regular_negative_ratio": 20,
+      "hard_negative_key_count": 281,
+      "rows_by_role": {
+        "positive": 52,
+        "hard_negative": 281,
+        "regular_negative": 1040
+      }
+    },
+    "calibration": {
+      "enabled": true,
+      "sources": [
+        "doubleT_obstacle",
+        "roundT_doubleT"
+      ],
+      "threshold_steps": 31,
+      "results": [
+        {
+          "threshold": 0.5,
+          "fixed_baseline": true,
+          "tp_frames": 52,
+          "fn_frames": 0,
+          "fp_frames": 45,
+          "tn_frames": 356,
+          "candidate": "model_v1"
+        },
+        {
+          "threshold": 0.967741935483871,
+          "tp_frames": 52,
+          "fn_frames": 0,
+          "fp_frames": 13,
+          "tn_frames": 388,
+          "candidate": "decision_tree"
+        },
+        {
+          "threshold": 0.967741935483871,
+          "tp_frames": 52,
+          "fn_frames": 0,
+          "fp_frames": 13,
+          "tn_frames": 388,
+          "candidate": "tree_depth3"
+        },
+        {
+          "threshold": 0.9354838709677419,
+          "tp_frames": 52,
+          "fn_frames": 0,
+          "fp_frames": 23,
+          "tn_frames": 378,
+          "candidate": "tree_depth5_min10"
+        },
+        {
+          "threshold": 0.8064516129032258,
+          "tp_frames": 52,
+          "fn_frames": 0,
+          "fp_frames": 10,
+          "tn_frames": 391,
+          "candidate": "random_forest_lite"
+        },
+        {
+          "threshold": 0.7096774193548387,
+          "tp_frames": 52,
+          "fn_frames": 0,
+          "fp_frames": 10,
+          "tn_frames": 391,
+          "candidate": "random_forest"
+        },
+        {
+          "threshold": 0.967741935483871,
+          "tp_frames": 52,
+          "fn_frames": 0,
+          "fp_frames": 10,
+          "tn_frames": 391,
+          "candidate": "gradient_boosting"
+        },
+        {
+          "threshold": 0.967741935483871,
+          "tp_frames": 52,
+          "fn_frames": 0,
+          "fp_frames": 10,
+          "tn_frames": 391,
+          "candidate": "lightgbm"
+        },
+        {
+          "threshold": 0.8709677419354839,
+          "tp_frames": 52,
+          "fn_frames": 0,
+          "fp_frames": 10,
+          "tn_frames": 391,
+          "candidate": "ensemble_v1"
+        }
+      ]
+    },
+    "development_evaluation": {
+      "evaluation_sources": "all",
+      "tp_frames": 52,
+      "fn_frames": 0,
+      "fp_frames": 193,
+      "tn_frames": 13514,
+      "unknown_fp_frames": 193,
+      "model_temporal_fp_frames": 0,
+      "threshold": 0.8064516129032258
+    }
+  }
+}

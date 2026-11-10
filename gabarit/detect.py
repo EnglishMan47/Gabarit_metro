@@ -85,6 +85,7 @@ class Candidate:
     single_beam: bool = False  # broad low body sampled by only one beam
     rail_local: bool = False   # height measured from a local rail baseline, independent of fitted path.z
     strict_rail_support: bool = True  # original high-threshold multi-beam rail evidence also exists
+    component_model_score: float | None = None
 
     @property
     def size(self) -> tuple[float, float, float]:
@@ -93,6 +94,8 @@ class Candidate:
     def public(self) -> dict:
         return {
             "id": self.id,
+            "component_model_score": (None if self.component_model_score is None else
+                                      round(float(self.component_model_score), 4)),
             "distance_m": round(self.distance, 2),
             "s_m": round(self.s_near, 2),
             "lateral_m": round(self.lateral, 2),
