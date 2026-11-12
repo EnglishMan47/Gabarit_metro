@@ -1,0 +1,1330 @@
+{
+  "checked_on": "2026-11-12",
+  "window": [
+    "2024-11-12",
+    "2026-11-12"
+  ],
+  "index": "OpenAlex",
+  "metric": "cited_by_count",
+  "selection": "https://openalex.org/W4411599651",
+  "selection_count": 50,
+  "scope": "Railway obstacle / intrusion detection; especially onboard LiDAR. Highest count among relevant works retrieved by the documented queries, not an exhaustive all-index claim.",
+  "queries": [
+    {
+      "url": "https://api.openalex.org/works?filter=title.search%3Arailway+intrusion%2Cfrom_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=100&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 83,
+      "returned": 83,
+      "local_cache": "openalex_intrusion_title.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?search=railway+lidar&filter=from_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=50&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 3225,
+      "returned": 50,
+      "local_cache": "openalex_lidar.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?search=railway+obstacle+detection&filter=from_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=50&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 4574,
+      "returned": 50,
+      "local_cache": "openalex_obstacle.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?filter=title.search%3Arailway+obstacle%2Cfrom_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=100&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 74,
+      "returned": 74,
+      "local_cache": "openalex_obstacle_title.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?search=rail+obstacle+detection&filter=from_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=50&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 4049,
+      "returned": 50,
+      "local_cache": "openalex_rail.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?filter=title.search%3Arail+lidar%2Cfrom_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=100&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 13,
+      "returned": 13,
+      "local_cache": "openalex_rail_lidar_title.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?filter=title.search%3Arail%2Cfrom_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=100&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 7866,
+      "returned": 100,
+      "local_cache": "openalex_rail_title.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?filter=title.search%3Arailroad%2Cfrom_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=100&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 846,
+      "returned": 100,
+      "local_cache": "openalex_railroad_title.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?filter=title.search%3Arailway+lidar%2Cfrom_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=100&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 52,
+      "returned": 52,
+      "local_cache": "openalex_railway_lidar_title.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?filter=title.search%3Arailway%2Cfrom_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=100&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 13379,
+      "returned": 100,
+      "local_cache": "openalex_railway_title.json"
+    },
+    {
+      "url": "https://api.openalex.org/works?filter=title.search%3Atrain%2Cfrom_publication_date%3A2024-11-12%2Cto_publication_date%3A2026-11-12&sort=cited_by_count%3Adesc&per-page=100&select=id%2Cdoi%2Ctitle%2Cpublication_date%2Ccited_by_count%2Ctype%2Cprimary_location",
+      "total_matches": 21402,
+      "returned": 100,
+      "local_cache": "openalex_train_title.json"
+    }
+  ],
+  "ranked_relevant_candidates": [
+    {
+      "id": "https://openalex.org/W4411599651",
+      "doi": "https://doi.org/10.1109/jiot.2025.3582636",
+      "title": "RailVoxelDet: A Lightweight 3-D Object Detection Method for Railway Transportation Driven by Onboard LiDAR Data",
+      "publication_date": "2025-06-24",
+      "cited_by_count": 50,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4404905103",
+      "doi": "https://doi.org/10.1038/s41597-024-03952-3",
+      "title": "An unmanned aerial vehicle captured dataset for railroad segmentation and obstacle detection",
+      "publication_date": "2024-12-02",
+      "cited_by_count": 27,
+      "type": "data-paper"
+    },
+    {
+      "id": "https://openalex.org/W4406753766",
+      "doi": "https://doi.org/10.1109/access.2025.3533304",
+      "title": "Railway Foreign Object Intrusion Detection Using UAV Images and YOLO-UAT",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 27,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4407449677",
+      "doi": "https://doi.org/10.1109/tits.2025.3536024",
+      "title": "Real-Time Railway Obstacle Detection Based on Multitask Perception Learning",
+      "publication_date": "2025-02-13",
+      "cited_by_count": 27,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4408199609",
+      "doi": "https://doi.org/10.1016/j.eswa.2025.127089",
+      "title": "LiDAR-Camera joint obstacle detection algorithm for railway track area",
+      "publication_date": "2025-03-06",
+      "cited_by_count": 19,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4407948331",
+      "doi": "https://doi.org/10.1109/tii.2025.3540494",
+      "title": "RAE3D: Multiscale Aggregation-Enhanced 3D Object Detection for Rail Transit Obstacle Perception",
+      "publication_date": "2025-02-26",
+      "cited_by_count": 16,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4413293101",
+      "doi": "https://doi.org/10.1186/s44147-025-00708-7",
+      "title": "Research on foreign object intrusion detection in railway tracks based on MSL-YOLO",
+      "publication_date": "2025-08-18",
+      "cited_by_count": 15,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4409913362",
+      "doi": "https://doi.org/10.1088/1361-6501/add201",
+      "title": "BCD-YOLO: a railway perimeter foreign body intrusion detection method based on Yolov8",
+      "publication_date": "2025-04-29",
+      "cited_by_count": 14,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4405650362",
+      "doi": "https://doi.org/10.1016/j.ergon.2024.103684",
+      "title": "Railway safety under increasing speed: Train drivers’ hazard perception of foreign object intrusion on railway tracks",
+      "publication_date": "2024-12-20",
+      "cited_by_count": 12,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4415624300",
+      "doi": "https://doi.org/10.1016/j.eswa.2025.130132",
+      "title": "Railway obstacle intrusion detection and risk assessment based on MSIA-YOLOv8 and DALNet",
+      "publication_date": "2025-10-28",
+      "cited_by_count": 10,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4409526827",
+      "doi": "https://doi.org/10.1016/j.measurement.2025.117584",
+      "title": "Few-shot multi-scale railway obstacle detection via lightweight linear transformer and precise feature reweighting",
+      "publication_date": "2025-04-17",
+      "cited_by_count": 9,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4412444479",
+      "doi": "https://doi.org/10.1109/access.2025.3589159",
+      "title": "Improved RT-DETR Framework for Railway Obstacle Detection",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 8,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4409820058",
+      "doi": "https://doi.org/10.1007/s11227-025-07254-2",
+      "title": "Multi-scale feature enhanced detection of foreign object intrusions on railways",
+      "publication_date": "2025-04-25",
+      "cited_by_count": 8,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4413010503",
+      "doi": "https://doi.org/10.1371/journal.pone.0329303",
+      "title": "Automatic detection of foreign object intrusion along railway tracks based on MACENet",
+      "publication_date": "2025-08-06",
+      "cited_by_count": 7,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4408410190",
+      "doi": "https://doi.org/10.3390/app15063118",
+      "title": "Deterministic Light Detection and Ranging (LiDAR)-Based Obstacle Detection in Railways Using Data Fusion",
+      "publication_date": "2025-03-13",
+      "cited_by_count": 7,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4416873457",
+      "doi": "https://doi.org/10.1109/tim.2025.3638928",
+      "title": "Railway Intrusion Detection Based on Dynamic Corridors and Multidimensional Constraints: A Point Cloud Processing Method",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 7,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4417093022",
+      "doi": "https://doi.org/10.48550/arxiv.2505.10784",
+      "title": "SynRailObs: A Synthetic Dataset for Obstacle Detection in Railway Scenarios",
+      "publication_date": "2025-05-16",
+      "cited_by_count": 6,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W4408166095",
+      "doi": "https://doi.org/10.1109/ojap.2025.3548112",
+      "title": "A Wideband 4×4 Patch Array Antenna With Low Sidelobes for Radar-Based Obstacle Detection in Railway Transportation",
+      "publication_date": "2025-03-05",
+      "cited_by_count": 5,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4412183582",
+      "doi": "https://doi.org/10.1088/1361-6501/adee33",
+      "title": "Lightweight and efficient railway foreign intrusion detection with feature enhancement and optimization",
+      "publication_date": "2025-07-10",
+      "cited_by_count": 4,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7114894022",
+      "doi": "https://doi.org/10.1016/j.engstruct.2025.121928",
+      "title": "Mechanism and application of obstacle-grid tuned particle impact dampers for railway track vibration and noise mitigation",
+      "publication_date": "2025-12-12",
+      "cited_by_count": 4,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4417334752",
+      "doi": "https://doi.org/10.1016/j.aei.2025.104228",
+      "title": "ROSD: Railway intrusion object generalized detection via Open-Set Detection",
+      "publication_date": "2025-12-15",
+      "cited_by_count": 4,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4413505949",
+      "doi": "https://doi.org/10.3390/s25175266",
+      "title": "Railway Intrusion Risk Quantification with Track Semantic Segmentation and Spatiotemporal Features",
+      "publication_date": "2025-08-24",
+      "cited_by_count": 4,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7116836257",
+      "doi": "https://doi.org/10.1016/j.yofte.2025.104542",
+      "title": "Towards open-set intrusion recognition in railway environments: Multi-task learning meets fiber-optic distributed acoustic sensing",
+      "publication_date": "2025-12-23",
+      "cited_by_count": 4,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4409201461",
+      "doi": "https://doi.org/10.5220/0013057600003941",
+      "title": "A Universal Railway Obstacle Detection System Based on Optical-Flow Guided Semi-Supervised Segmentation",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 3,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4409487437",
+      "doi": "https://doi.org/10.1016/j.eij.2025.100682",
+      "title": "Automatic identification method of foreign body intrusion in railway transportation track based on improved LeaderRank identification of key points",
+      "publication_date": "2025-04-16",
+      "cited_by_count": 3,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4415482542",
+      "doi": "https://doi.org/10.1109/access.2025.3625083",
+      "title": "DN-LSK-EMA-Net: A Dual-Stream Framework With Large Selective Kernels and Efficient Multi-Scale Attention for Multi-Environmental Railway Intrusion Detection",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 3,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4411970052",
+      "doi": "https://doi.org/10.1007/s12652-025-04987-z",
+      "title": "Improving safety through advanced obstacle detection at railway level crossings",
+      "publication_date": "2025-07-03",
+      "cited_by_count": 3,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4412836745",
+      "doi": "https://doi.org/10.1109/jsen.2025.3592669",
+      "title": "Vision-Based Few-Shot Railway Intrusion Detection via Dual-Detector and Contrastive Learning",
+      "publication_date": "2025-08-01",
+      "cited_by_count": 3,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7125604579",
+      "doi": "https://doi.org/10.1109/jsen.2026.3650943",
+      "title": "YOLO-Rail: An Improved YOLO Model for Obstacle Detection on Railway Tracks",
+      "publication_date": "2026-01-21",
+      "cited_by_count": 3,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4414405935",
+      "doi": "https://doi.org/10.1109/icctdc64446.2025.11158742",
+      "title": "A Smart Rail Guard IoT Based Railway Track Obstacle Detection and Alert System Using Deep Learning Techniques and Computer Vision",
+      "publication_date": "2025-07-04",
+      "cited_by_count": 2,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4415209460",
+      "doi": "https://doi.org/10.3390/s25206344",
+      "title": "Dual Weakly Supervised Anomaly Detection and Unsupervised Segmentation for Real-Time Railway Perimeter Intrusion Monitoring",
+      "publication_date": "2025-10-14",
+      "cited_by_count": 2,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7116766886",
+      "doi": "https://doi.org/10.1109/access.2025.3646931",
+      "title": "Leveraging Domain-Specific Features for High-Performance Obstacle Classification in Railway Monitoring",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 2,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4411593527",
+      "doi": "https://doi.org/10.1088/2631-8695/ade7cd",
+      "title": "Non-specific obstacle detection in the railway track area based on deep learning",
+      "publication_date": "2025-06-24",
+      "cited_by_count": 2,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4412061856",
+      "doi": "https://doi.org/10.1587/transinf.2024edp7318",
+      "title": "ROD-YOLO: A Fast and Accurate Obstacle Detection Framework for Railways Based on Feature Enhancement and Context Aggregation",
+      "publication_date": "2025-07-06",
+      "cited_by_count": 2,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4411484340",
+      "doi": "https://doi.org/10.1109/icdsbs63635.2025.11031551",
+      "title": "Railway Sentinel: Smart System for Collision Avoidance and Obstacles Tracking",
+      "publication_date": "2025-04-17",
+      "cited_by_count": 2,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7162456212",
+      "doi": "https://doi.org/10.32628/ijsrset25122153",
+      "title": "Real-Time Railway Track Crack and Obstacle Detection System using Arduino and IoT Alert",
+      "publication_date": "2025-03-24",
+      "cited_by_count": 2,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4410295096",
+      "doi": "https://doi.org/10.1109/ictmim65579.2025.10988119",
+      "title": "Smart Railway Track Obstacle and Crack Detection System with Automated Alert Mechanism",
+      "publication_date": "2025-04-07",
+      "cited_by_count": 2,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4417438587",
+      "doi": "https://doi.org/10.1109/jsen.2025.3633775",
+      "title": "Train-Mounted Railway Clearance Intrusion Detection With Integrated Trimodality Sensor and Evidential Modality Credibility Evaluation",
+      "publication_date": "2025-12-17",
+      "cited_by_count": 2,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4407601439",
+      "doi": "https://doi.org/10.1145/3709026.3709113",
+      "title": "A Method for Railway Intrusion Objects Detection with LiDAR and Image Fusion",
+      "publication_date": "2024-12-06",
+      "cited_by_count": 1,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7167686579",
+      "doi": "https://doi.org/10.1109/jsen.2026.3708154",
+      "title": "An Onboard Multimodal Sparse Perception Framework for Railway Intrusion Detection",
+      "publication_date": "2026-07-08",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7139016623",
+      "doi": "https://doi.org/10.1093/comjnl/bxaf152",
+      "title": "An algorithm for open railway obstacle intrusion detection",
+      "publication_date": "2026-03-20",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7124264102",
+      "doi": "https://doi.org/10.48550/arxiv.2601.09613",
+      "title": "CogRail: Benchmarking VLMs in Cognitive Intrusion Perception for Intelligent Railway Transportation Systems",
+      "publication_date": "2026-01-14",
+      "cited_by_count": 1,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W7124167258",
+      "doi": "https://doi.org/10.1088/2631-8695/ae388d",
+      "title": "Deep learning-based railway intrusion detection model under complex environments",
+      "publication_date": "2026-01-14",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7127116188",
+      "doi": "https://doi.org/10.1016/j.engappai.2026.114008",
+      "title": "End-to-end railway obstacle detection enhanced by point cloud segmentation",
+      "publication_date": "2026-02-02",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7155641752",
+      "doi": "https://doi.org/10.1016/j.measurement.2026.121655",
+      "title": "Enhanced railway intrusion detection and evaluation through train-rail cooperative perception",
+      "publication_date": "2026-04-25",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7160153011",
+      "doi": "https://doi.org/10.3390/s26092844",
+      "title": "FPN-Based Faster R-CNN for Fiber Distributed Acoustic Sensing Intrusion Detection in High-Speed Railway",
+      "publication_date": "2026-05-02",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4407730978",
+      "doi": "https://doi.org/10.1016/j.hspr.2025.01.002",
+      "title": "Influence of guidance signs on platform evacuation in suburban railway tunnel under smoke and obstacle environment",
+      "publication_date": "2025-02-20",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4414250786",
+      "doi": "https://doi.org/10.1007/978-3-032-05060-1_17",
+      "title": "Leveraging Vision-Language Models for Improving Detection of Obstacles on Railway Tracks",
+      "publication_date": "2025-09-16",
+      "cited_by_count": 1,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4409659632",
+      "doi": "https://doi.org/10.1109/icit63637.2025.10965298",
+      "title": "Lightweight YOLO Framework for Image-Based Railway Foreign Object Intrusion Intelligent Perception",
+      "publication_date": "2025-03-26",
+      "cited_by_count": 1,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7136673272",
+      "doi": "https://doi.org/10.3390/app16062848",
+      "title": "Machine Vision-Based Intelligent Intrusion Detection Method for Obstacles on Open Railways in Low-Light Environments",
+      "publication_date": "2026-03-16",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4410210915",
+      "doi": "https://doi.org/10.1504/ijvas.2025.146148",
+      "title": "Obstacle detection in railway tracks: vehicle autonomous system application",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7163957854",
+      "doi": "https://doi.org/10.1109/tits.2026.3694886",
+      "title": "RT-RIDMOS: Real-Time Railway Intrusion Detection Method Based on Moving Object Segmentation",
+      "publication_date": "2026-06-08",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7148814254",
+      "doi": "https://doi.org/10.1109/access.2026.3680776",
+      "title": "RobustRailNet: Architecture-Driven Adversarial Robustness for Safety-Critical Railway Obstacle Perception",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4410631898",
+      "doi": "https://doi.org/10.2139/ssrn.5265865",
+      "title": "Smart Train Engine with Obstacle Detection and Railway Gate Control",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 1,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W7139915838",
+      "doi": "https://doi.org/10.3390/app16063026",
+      "title": "Spatial Relation Reasoning Based on Keypoints for Railway Intrusion Detection and Risk Assessment",
+      "publication_date": "2026-03-20",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4414908549",
+      "doi": "https://doi.org/10.1109/tpel.2025.3618687",
+      "title": "The Solder Layers Degradation of 6.5 kV IGBT Modules for Railway in Power Cycling Tests Considering Moisture Intrusion",
+      "publication_date": "2025-10-07",
+      "cited_by_count": 1,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7160879875",
+      "doi": "https://doi.org/10.5281/zenodo.20119915",
+      "title": "\"RailGuard AI: Real-Time Railway Intrusion Detection Using Deep Learning\"",
+      "publication_date": "2026-05-11",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7197041570",
+      "doi": "https://doi.org/10.48550/arxiv.2608.04710",
+      "title": "A 6G Integrated Sensing and Communication Framework for Railway Intrusion Detection and Collision Prediction",
+      "publication_date": "2026-08-05",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W7131317812",
+      "doi": "https://doi.org/10.33086/atcsj.v8i2.8579",
+      "title": "A Dual-Stage Hybrid Vision Framework Using YOLOv8n-Canny Edge Detection for Real-Time Railway Trespassing and Intrusion Monitoring",
+      "publication_date": "2025-12-31",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7125009405",
+      "doi": "https://doi.org/10.1109/icicml67980.2025.11333656",
+      "title": "A Multi-Task YOLOv8-Based Framework for Railway Obstacle Detection and Rail Track Segmentation",
+      "publication_date": "2025-11-21",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4408472117",
+      "doi": "https://doi.org/10.1007/978-981-96-3973-1_54",
+      "title": "A Real-Time Railway Intrusion Detection and Multi-factor Collaborative Risk Assessment Method",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7162509243",
+      "doi": "https://doi.org/10.1007/978-3-032-18132-9_21",
+      "title": "A Vision-Based Railway Obstacle Detection System Using Low-Light Image Enhancement and Deep Learning for Safety Automation",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4412976150",
+      "doi": "https://doi.org/10.1007/978-981-96-7441-1_2",
+      "title": "A YOLOv5-Based Approach for Detecting Train Occupancy Disruption and Pedestrian Intrusion on Railway Tracks",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7158363595",
+      "doi": "https://doi.org/10.1038/s41598-026-50869-5",
+      "title": "A cascaded detection method for railway foreign object intrusion in extreme weather based on improved LR-ASPP and fused Mamba-YOLO",
+      "publication_date": "2026-04-29",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7223158973",
+      "doi": "https://doi.org/10.1109/igarss60577.2026.11731385",
+      "title": "A demonstrator for space-borne tiled SAR-based real-time railway obstacle detection",
+      "publication_date": "2026-08-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7125709677",
+      "doi": "https://doi.org/10.2139/ssrn.6137169",
+      "title": "A novel low-cost approach for intelligent obstacle detection in freight railway environment",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W7220920583",
+      "doi": "https://doi.org/10.1016/j.aei.2026.105337",
+      "title": "A structured review of railway obstacle detection as an engineering informatics problem: Sensing, representation, decision support, and traceability",
+      "publication_date": "2026-10-08",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7163636880",
+      "doi": "https://doi.org/10.1088/1361-6501/ae78f0",
+      "title": "A weather-aware and scale-adaptive framework for tiny object detection in railway intrusion monitoring",
+      "publication_date": "2026-06-05",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7152055358",
+      "doi": "https://doi.org/10.5281/zenodo.19470257",
+      "title": "AI-Driven Intelligent Railway Monitoring: Integrating Track Defect and Obstacle Detection for Next-Generation Rail Safety",
+      "publication_date": "2026-04-30",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7165487096",
+      "doi": "https://doi.org/10.30932/9785002709564-2026-250-257",
+      "title": "APPLICATION OF MULTIMODAL LANGUAGE MODELS FOR DETECTING OBSTACLES ON A RAILWAY TRACK",
+      "publication_date": "2026-05-21",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7149241397",
+      "doi": "https://doi.org/10.13140/rg.2.2.19296.44803",
+      "title": "AleRT: A Smart Railway Platform Line Intrusion Detection System",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7160321188",
+      "doi": "https://doi.org/10.1109/iciprob69625.2026.11497807",
+      "title": "An Autonomous Advance-Scout Platform for Vision-Based Railway Obstacle Detection and Driver Assistance",
+      "publication_date": "2026-03-07",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4410357120",
+      "doi": "https://doi.org/10.2139/ssrn.5250715",
+      "title": "Automatic Detection of Obstacle in Railway Track",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W4413086946",
+      "doi": "https://doi.org/10.1142/s0218001425500247",
+      "title": "Automatic Detection of Obstacles in Underground Railway Tracks for Collision Prevention",
+      "publication_date": "2025-07-17",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4416732333",
+      "doi": "https://doi.org/10.55248/gengpi.06.1125.3880",
+      "title": "Automatic Railway Gate Control With Obstacle Detection Using Arduino",
+      "publication_date": "2025-11-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4413835718",
+      "doi": "https://doi.org/10.2139/ssrn.5419037",
+      "title": "CogRail: Benchmarking VLMs for Cognitive Railway Intrusion Perception",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W4413343313",
+      "doi": "https://doi.org/10.2139/ssrn.5398310",
+      "title": "Cograil: Benchmarking Vlms for Cognitive Railway Intrusion Perception",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W4415622369",
+      "doi": "https://doi.org/10.1186/s44147-025-00762-1",
+      "title": "Correction: Research on foreign object intrusion detection in railway tracks based on MSL-YOLO",
+      "publication_date": "2025-10-28",
+      "cited_by_count": 0,
+      "type": "erratum"
+    },
+    {
+      "id": "https://openalex.org/W7222273771",
+      "doi": "https://doi.org/10.22363/2312-8674-2026-25-3-539-551",
+      "title": "Cross-Border as Obstacle: Transferring American Steam Locomotives from Chinese Eastern Railway to Transbaikal Railway in 1915-1916",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4412562095",
+      "doi": "https://doi.org/10.2139/ssrn.5360580",
+      "title": "Dual-Optimized Lightweight Model for Railway Foreign Object Intrusion Detection",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W7165545203",
+      "doi": "https://doi.org/10.21203/rs.3.rs-8026046/v1",
+      "title": "Dynamic Threat Recognition in Complex Railway Environments: Intrusion Target Detection via Adaptive Deep Networks and Edge Computing Integration",
+      "publication_date": "2026-06-22",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W4409201556",
+      "doi": "https://doi.org/10.5220/0013268300003941",
+      "title": "Enhancing Railway Obstacle Detection System Based on Incremental Learning",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4409376639",
+      "doi": "https://doi.org/10.38124/ijisrt/25mar1923",
+      "title": "Enhancing Railway Safety is Leveraging Local and Global Information for Obstacle Detection",
+      "publication_date": "2025-04-11",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7203944040",
+      "doi": "https://doi.org/10.1016/j.aei.2026.105153",
+      "title": "Event-level perception of non-specific foreign object intrusions on railways: A framework with track-relative spatiotemporal reasoning",
+      "publication_date": "2026-08-21",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7203772329",
+      "doi": "https://doi.org/10.1080/17499518.2026.2718955",
+      "title": "FEE-RTDETR: dynamic frequency convolution guided motion-blur-aware detection of dense rockfalls and track intrusions on railway slopes",
+      "publication_date": "2026-08-18",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7213960265",
+      "doi": null,
+      "title": "Foreign-object intrusion detection on railway tracks based on YOLO-Mamba",
+      "publication_date": "2026-05-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7212404628",
+      "doi": "https://doi.org/10.1016/j.optlastec.2026.116343",
+      "title": "FusionOptics: Optical-visual fusion framework for high-speed railway perimeter intrusion detection",
+      "publication_date": "2026-09-12",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7160892271",
+      "doi": "https://doi.org/10.1145/3796263.3796292",
+      "title": "High-Speed Railway Perimeter Intrusion Detection Using CNN-LSTM-HMM Based on UWFBG Sensing Network",
+      "publication_date": "2026-01-23",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7162872524",
+      "doi": "https://doi.org/10.29284/7j1j7q93",
+      "title": "Hybridrailnet: A 5g-Enabled Dual-Stream Fmcw Radar Framework For Real Time Railway Obstacle Detection",
+      "publication_date": "2025-04-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4416874536",
+      "doi": "https://doi.org/10.1109/aann66429.2025.11257722",
+      "title": "ILS-YOLO: An Algorithm for Open-Environment Railway Obstacle Detection Under Low-Light Conditions",
+      "publication_date": "2025-08-15",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7164579508",
+      "doi": "https://doi.org/10.12438/cst.2025-1698",
+      "title": "Identification of unmanned obstacles of railway electric locomotive in coal mine under complicated working conditions",
+      "publication_date": "2026-05-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7165750042",
+      "doi": "https://doi.org/10.1109/iccrtee68719.2026.11566636",
+      "title": "Integrating AI, Digital Twins and Smart Deterrence Technologies to Mitigate Wildlife and Livestock Intrusion on Railway Networks",
+      "publication_date": "2026-05-14",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7160017128",
+      "doi": "https://doi.org/10.1109/ccic68129.2026.11486053",
+      "title": "Intelligent Rail Safe Rover for Real-Time Crack and Obstacle Detection on Railway Tracks",
+      "publication_date": "2026-02-06",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7141845050",
+      "doi": "https://doi.org/10.64771/ijesat.2026.v26.i03.2254",
+      "title": "Intelligent Railway Gate Control System Using IR Sensors And Obstacle Detection",
+      "publication_date": "2026-03-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7212112209",
+      "doi": "https://doi.org/10.1109/jsen.2026.3730546",
+      "title": "Interpretable Railway Track and Obstacle Detection Using On-Board LiDAR",
+      "publication_date": "2026-09-10",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7165599764",
+      "doi": "https://doi.org/10.1109/icssas68835.2026.11559534",
+      "title": "IoT-Based Railway Level Crossing Safety System with Obstacle Detection and Loco Pilot Alert",
+      "publication_date": "2026-05-28",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7117539852",
+      "doi": "https://doi.org/10.17148/ijarcce.2025.1412150",
+      "title": "IoT-Based Railway Track Fault, Obstacle, and Fire Detection Robot",
+      "publication_date": "2025-12-30",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7223452435",
+      "doi": "https://doi.org/10.1007/s11760-026-05806-4",
+      "title": "LPV-DETR: a lightweight real-time machine vision method for railway foreign object intrusion detection",
+      "publication_date": "2026-10-24",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4414417814",
+      "doi": "https://doi.org/10.1117/12.3085711",
+      "title": "Lidar-based foreign object detection for railway intrusion under adverse weather conditions",
+      "publication_date": "2025-09-23",
+      "cited_by_count": 0,
+      "type": "conference-abstract"
+    },
+    {
+      "id": "https://openalex.org/W7204234612",
+      "doi": "https://doi.org/10.1109/ecnct70535.2026.11661466",
+      "title": "Lightweight AAC-YOLO Algorithm for Railway Foreign Object Intrusion Detection",
+      "publication_date": "2026-07-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4411447041",
+      "doi": "https://doi.org/10.1109/icpcsn65854.2025.11035874",
+      "title": "Lightweight Framework for Railway Obstacle Detection using YOLO Network",
+      "publication_date": "2025-05-14",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4406288735",
+      "doi": "https://doi.org/10.55041/ijsrem40718",
+      "title": "Machine learning based Obstacle and wild animal detection for avoiding accidents on Railway Tracks",
+      "publication_date": "2025-01-12",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4415573385",
+      "doi": "https://doi.org/10.51583/ijltemas.2025.1410000002",
+      "title": "Microcontroller – Based Automatic Railway Crossing Control and Track Obstacle Monitoring System",
+      "publication_date": "2025-10-27",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7118022024",
+      "doi": "https://doi.org/10.33430/v32n4thie-2025-0019",
+      "title": "Monitoring Tree Intrusion Along Railway Networks Using LiDAR Technology",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7225463530",
+      "doi": "https://doi.org/10.58420/ptk/2026.91.03.005",
+      "title": "OBSTACLE DETECTION ON RAILWAY TRACKS FROM UAV IMAGERY: A LEAKAGE-AWARE EVALUATION",
+      "publication_date": "2026-09-15",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4409072182",
+      "doi": "https://doi.org/10.1007/978-981-96-3961-8_52",
+      "title": "Object Detection Method for Railway Track Foreign Body Intrusion Based on Machine Vision",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7139113311",
+      "doi": "https://doi.org/10.1134/s1064562425700413",
+      "title": "Onboard Instance Segmentation of Railway Infrastructure and Obstacles for Autonomous Train Systems",
+      "publication_date": "2025-10-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7225612908",
+      "doi": "https://doi.org/10.1109/icicr69256.2026.00163",
+      "title": "Onboard Real-Time Obstacle Detection for High-Speed Railway UAV Inspection Based on SPM-YOLO Model",
+      "publication_date": "2026-06-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7155787827",
+      "doi": "https://doi.org/10.5281/zenodo.19827935",
+      "title": "RAILWAY TRACK OBSTACLE DETECTION USING CNN FOR ACCIDENT AVOIDANCE",
+      "publication_date": "2026-04-27",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4417521364",
+      "doi": "https://doi.org/10.12732/ijam.v38i12s.1528",
+      "title": "REAL-TIME RAILWAY TRACK OBSTACLE DETECTION USING RESNET18 AND MULTI-HEAD ATTENTION ON RADAR SPECTROGRAMS",
+      "publication_date": "2025-12-07",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4415660034",
+      "doi": "https://doi.org/10.1108/srt-09-2025-0023",
+      "title": "RPIL-3D:3D localization for railway perimeter intrusion targets",
+      "publication_date": "2025-10-29",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4415055828",
+      "doi": "https://doi.org/10.2139/ssrn.5589452",
+      "title": "RVS-DBA Feature Fusion for Radar-Vision Dual-Modality Detection of Railway Intrusions",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W7163911280",
+      "doi": "https://doi.org/10.3390/s26123637",
+      "title": "Rail-BEV: A LiDAR-Centric and Sensor-Aware BEV Perception Framework for Long-Range Railway Obstacle Detection",
+      "publication_date": "2026-06-07",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7204863567",
+      "doi": "https://doi.org/10.48550/arxiv.2608.30727",
+      "title": "RailGen: Improving Railway Intrusion Detection via Agent-Guided Small-Scale Foreign Object Generation",
+      "publication_date": "2026-08-31",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W4414634995",
+      "doi": "https://doi.org/10.1007/978-3-032-00218-1_23",
+      "title": "Railway Foreign Body Intrusion Algorithm Based on Improved YOLOv7-Tiny MS YOLOv7-Tiny",
+      "publication_date": "2025-09-30",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4410986354",
+      "doi": "https://doi.org/10.1109/iscait64916.2025.11010273",
+      "title": "Railway Foreign Object Intrusion Detection Inspired by Star-operation and Coordinate Attention",
+      "publication_date": "2025-03-21",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7165160055",
+      "doi": "https://doi.org/10.1007/978-981-95-9342-2_41",
+      "title": "Railway Intrusion Detection Based on YOLOV8",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7130842263",
+      "doi": "https://doi.org/10.1007/978-981-95-6754-6_4",
+      "title": "Railway Intrusion Small Object Detection Based on Improved YOLOv8",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7125813423",
+      "doi": "https://doi.org/10.1109/iscsic67494.2025.11351987",
+      "title": "Railway Track Foreign Object Intrusion Detection Based on Attention Mechanism and Lightweight Convolution",
+      "publication_date": "2025-09-26",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4417246906",
+      "doi": "https://doi.org/10.48175/ijarsct-30411",
+      "title": "Railway Track Monitoring for Obstacles and Damage Detection using AI and ML",
+      "publication_date": "2025-12-11",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4416240894",
+      "doi": "https://doi.org/10.1007/978-981-96-8796-1_15",
+      "title": "Railway Track Obstacle Detection and Alert System Using Deep Learning",
+      "publication_date": "2025-11-15",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4414762958",
+      "doi": "https://doi.org/10.3403/30415141",
+      "title": "Railway applications. Design for PRM Use. Requirements on obstacle free routes for infrastructure",
+      "publication_date": "2025-10-02",
+      "cited_by_count": 0,
+      "type": "standard"
+    },
+    {
+      "id": "https://openalex.org/W4408287976",
+      "doi": "https://doi.org/10.1117/12.3059112",
+      "title": "Railway clearance intrusion detection using feature fusion enhancement neural network",
+      "publication_date": "2025-03-10",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7219861450",
+      "doi": "https://doi.org/10.5281/zenodo.23134984",
+      "title": "Railway intrusion Scene Video dataset",
+      "publication_date": "2026-10-04",
+      "cited_by_count": 0,
+      "type": "other"
+    },
+    {
+      "id": "https://openalex.org/W7171320193",
+      "doi": "https://doi.org/10.5281/zenodo.21579667",
+      "title": "Real-Time Railway Track Crack and Obstacle Detection System using Arduino and IoT Alert",
+      "publication_date": "2025-03-25",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4417493471",
+      "doi": "https://doi.org/10.61173/p3eb3n60",
+      "title": "Research and Analysis of Railway Obstacle Detection Technology Based on Deep Learning",
+      "publication_date": "2025-12-19",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7207751587",
+      "doi": "https://doi.org/10.1007/978-981-92-2254-4_5",
+      "title": "Research on Detection Method of Railway Intrusion Obstacles Based on Deep Learning",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7154951846",
+      "doi": "https://doi.org/10.1109/iscait69154.2026.11477257",
+      "title": "Research on Foreign Object Intrusion Detection of Railway Tracks in Rainy and Foggy Weather",
+      "publication_date": "2026-01-23",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7165780934",
+      "doi": "https://doi.org/10.1109/ccdc69976.2026.11559913",
+      "title": "Research on Railway Foreign Object Intrusion Detection Based on Improved YOLOv8s",
+      "publication_date": "2026-05-15",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4408876903",
+      "doi": "https://doi.org/10.12677/airr.2025.142041",
+      "title": "Research on Railway Transportation Obstacle Detection System Based on Improved Long and Short Focal Image Fusion Technology",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7204583805",
+      "doi": "https://doi.org/10.1007/978-981-92-2258-2_53",
+      "title": "Research on Two-Stage Railway Intrusion Detection Using Enhanced U-Net and YOLOv11",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7204559014",
+      "doi": "https://doi.org/10.1007/978-981-92-2258-2_4",
+      "title": "Research on a Deep Learning-Based Foreign Object Intrusion Detection Model for Railway Tracks Using Mamba-YOLO",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4414102197",
+      "doi": "https://doi.org/10.1117/12.3078669",
+      "title": "Research on detection of illegal personnel intrusion into railway yard based on YOLOv8",
+      "publication_date": "2025-09-10",
+      "cited_by_count": 0,
+      "type": "conference-abstract"
+    },
+    {
+      "id": "https://openalex.org/W4409896031",
+      "doi": "https://doi.org/10.1145/3718751.3718784",
+      "title": "Research on experimental method of high-speed railway perimeter intrusion monitoring technology based on multi-sensor fusion",
+      "publication_date": "2024-11-15",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4414102228",
+      "doi": "https://doi.org/10.1117/12.3078648",
+      "title": "Research on foreign object intrusion detection on railway tracks with complicated weather",
+      "publication_date": "2025-09-10",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7172518089",
+      "doi": "https://doi.org/10.1049/icp.2026.2689",
+      "title": "Research on high-speed railway perimeter intrusion monitoring and alarm technology based on multi-sensor fusion",
+      "publication_date": "2026-08-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4409868979",
+      "doi": "https://doi.org/10.1145/3718751.3718764",
+      "title": "Research on perimeter intrusion monitoring technology of high-speed railway based on multi-source heterogeneous data fusion",
+      "publication_date": "2024-11-15",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7214025973",
+      "doi": "https://doi.org/10.1117/12.3121770",
+      "title": "Risk level assessment of railway obstacles by integrating scene parsing and spatial distance",
+      "publication_date": "2026-09-22",
+      "cited_by_count": 0,
+      "type": "conference-abstract"
+    },
+    {
+      "id": "https://openalex.org/W7212075618",
+      "doi": "https://doi.org/10.3390/infrastructures11090323",
+      "title": "Risk-Aware Railway Obstacle Detection via Track Segmentation and Lateral Distance Estimation",
+      "publication_date": "2026-09-09",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4411244230",
+      "doi": "https://doi.org/10.55041/ijsrem49983",
+      "title": "Robot For Railway Track Monitoring with Obstacle Detection",
+      "publication_date": "2025-06-12",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7130700368",
+      "doi": "https://doi.org/10.5281/zenodo.18709417",
+      "title": "SMART RAILWAY TRACK OBSTACLE MONITORING SYSTEM WITH INTENT-BASED RISK CLASSIFICATION",
+      "publication_date": "2026-02-20",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7204591660",
+      "doi": "https://doi.org/10.1007/978-981-92-2258-2_40",
+      "title": "SN-YOLO: A Heavy-Haul Railway Perimeter Intrusion Detection Method Based on YOLOv11",
+      "publication_date": "2026-01-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4413967337",
+      "doi": "https://doi.org/10.1109/icmlcn64995.2025.11140128",
+      "title": "Semantic Communication for Video Surveillance in Railway Intrusion Detection",
+      "publication_date": "2025-05-26",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4415216865",
+      "doi": "https://doi.org/10.12783/shm2025/37360",
+      "title": "Smart Railway Safety: Integrating Deep Learning with Vision Transformers for Obstacle Detection and Track Health Monitoring",
+      "publication_date": "2025-09-09",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W4411329585",
+      "doi": "https://doi.org/10.2139/ssrn.5278026",
+      "title": "Smart Train Engine with Obstacle Detection and Railway Gate Control System",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W7168222511",
+      "doi": "https://doi.org/10.1038/s41598-026-62020-5",
+      "title": "Spatial-aware energy learning for out-of-distribution segmentation in railway intrusion detection",
+      "publication_date": "2026-07-13",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4416010994",
+      "doi": "https://doi.org/10.1109/icirt66379.2025.11216775",
+      "title": "Strip-Convolution Feature Fusion Network for Foreign Object Intrusion Detection in Railway Scene",
+      "publication_date": "2025-10-11",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7162959947",
+      "doi": "https://doi.org/10.65073/1658-9343.1176",
+      "title": "The Mecca–Jeddah Railway Project: Historical Roots and Implementation Obstacles (1289–1353 AH/1872–1934 AD)",
+      "publication_date": "2026-05-28",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7108339461",
+      "doi": "https://doi.org/10.2139/ssrn.5854005",
+      "title": "Towards Intelligent Railway Resilience: A Review of Emerging Technologies for Risk Assessment and Prevention of Train Derailments due to Foreign Object Intrusion",
+      "publication_date": "2025-01-01",
+      "cited_by_count": 0,
+      "type": "preprint"
+    },
+    {
+      "id": "https://openalex.org/W7162758576",
+      "doi": "https://doi.org/10.1371/journal.pone.0349562",
+      "title": "Towards intelligent railway monitoring: A novel hybrid deep learning architecture for railway obstacle detection",
+      "publication_date": "2026-05-29",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4414814050",
+      "doi": "https://doi.org/10.1007/s13177-025-00550-4",
+      "title": "Traffic Safety Identification Technology Combined with Foreign Body Intrusion Intelligent Identification Technology in Railway Scene",
+      "publication_date": "2025-10-04",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W4416214237",
+      "doi": "https://doi.org/10.1117/12.3091004",
+      "title": "Urban railway vehicle obstacle detection considering improved Mask R-CNN model",
+      "publication_date": "2025-11-14",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7153858145",
+      "doi": "https://doi.org/10.55041/isjem.acme157",
+      "title": "Vision Based Few-Shot Railway Intrusion Detection Via Dual Detector and Contrastive Learning",
+      "publication_date": "2026-04-12",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7203610976",
+      "doi": "https://doi.org/10.1109/cvidl70130.2026.11637741",
+      "title": "YOLO-EA: A Railway Clearance Foreign Object Intrusion Detection Method Based on YOLO11n",
+      "publication_date": "2026-05-01",
+      "cited_by_count": 0,
+      "type": "conference-paper"
+    },
+    {
+      "id": "https://openalex.org/W7213897548",
+      "doi": "https://doi.org/10.1088/2631-8695/aeaaa2",
+      "title": "YOLOv11-EASFF: an improved object detection model with early adaptive spatial feature fusion and structured pruning for railway foreign object intrusion detection",
+      "publication_date": "2026-09-21",
+      "cited_by_count": 0,
+      "type": "article"
+    },
+    {
+      "id": "https://openalex.org/W7204108428",
+      "doi": "https://doi.org/10.3390/app16178423",
+      "title": "YOLOv11n-LSL: An Efficient Network for Foreign Object Intrusion Detection in Complex Railway Environments",
+      "publication_date": "2026-08-24",
+      "cited_by_count": 0,
+      "type": "article"
+    }
+  ]
+}

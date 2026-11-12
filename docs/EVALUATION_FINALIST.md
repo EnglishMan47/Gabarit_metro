@@ -1,3 +1,5 @@
+Актуализация 12.11.2026: текущие результаты и ограничения приведены в [VALIDATION_2026_11_12.md](VALIDATION_2026_11_12.md), модели — в [MODELS.md](MODELS.md), команды оценки — в [DATA_AND_EVALUATION.md](DATA_AND_EVALUATION.md). Числа прежних версий ниже сохраняются как история и не описывают текущую версию.
+
 # Оценка по критериям финала
 
 `scripts/evaluate.py` и `python -m gabarit evaluate` сохраняют прежние поля

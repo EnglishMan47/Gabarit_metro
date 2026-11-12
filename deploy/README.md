@@ -1,33 +1,85 @@
-# Облачное демо в Яндекс Облаке
+# Развёртывание веб демо
 
-Демо: **http://62.84.115.61** — веб-интерфейс на виртуальной машине Yandex Compute Cloud (Container Optimized Image), панель администратора — `/admin` (логин `admin`, пароль задаётся при развёртывании). При первом запуске на сервере создаётся демонстрационная запись с препятствием; свои записи загружаются кнопкой «+ Загрузить».
+Актуализировано 12 ноября 2026 года по файлам репозитория. Здесь находятся облегчённый веб-образ и сценарии прежнего развёртывания в Yandex Cloud. Подключение к облаку и обновление сервера при подготовке инструкции не выполнялись; прежний адрес демо не считается подтверждённым экземпляром текущей версии.
 
-В облаке недоступны Docker Hub и репозиторий пакетов ROS (`packages.ros.org`), поэтому для демо собирается лёгкий образ только с веб-интерфейсом — [`Dockerfile.web`](Dockerfile.web) на `python:3.11-slim` с зеркала `mirror.gcr.io`. Полный образ с ROS 2 ([`../Dockerfile`](../Dockerfile)) — для локального запуска.
+Основная установка с ROS 2 и RViz — в [INSTALLATION.md](../docs/INSTALLATION.md), модели — в [MODELS.md](../docs/MODELS.md), результаты и ограничения — в [VALIDATION_2026_11_12.md](../docs/VALIDATION_2026_11_12.md).
 
-## Как развёрнуто
+## Файлы каталога
 
-1. `deploy/yc-setup.sh` — реестр `gabarit`, сервисные аккаунты, статический IP, группа безопасности (порты 80 и 22), ВМ `gabarit-demo` (2 vCPU, 4 ГБ, SSD 50 ГБ): `CORES=2 MEMORY=4 DISK_GB=50 GABARIT_ADMIN_PASSWORD=<пароль> bash deploy/yc-setup.sh`.
-2. Сборка на самой ВМ, без SSH и без локального Docker: код (`git archive`) кладётся в приватный бакет Object Storage, ВМ получает временную ссылку и спецификацию с контейнером-сборщиком (`mirror.gcr.io/library/docker:27-cli`), который собирает `Dockerfile.web`, отправляет образ в реестр и пишет ход работы в последовательный порт (`yc compute instance get-serial-port-output --name gabarit-demo`).
-3. Спецификация [`docker-compose.yaml`](docker-compose.yaml) с образом, закреплённым по digest, применяется командой `yc compute instance update-container --name gabarit-demo --docker-compose-file <файл>` (агент ВМ реагирует именно на неё, а не на изменение метаданных).
+| Файл | Назначение |
+|---|---|
+| [Dockerfile.web](Dockerfile.web) | Python 3.11 и веб-воспроизведение bag, без ROS, RViz и PyTorch |
+| [docker-compose.yaml](docker-compose.yaml) | облачный шаблон с подстановкой образа и пароля |
+| [yc-setup.sh](yc-setup.sh) | создание или повторное использование облачных ресурсов |
+| [vm-build.sh](vm-build.sh) | архив committed HEAD, сборка на ВМ и push в реестр |
+| [upload-bag.sh](upload-bag.sh) | копирование bag по SSH, замена одноимённой записи и перезапуск |
+| [ci-cloud.yaml](ci-cloud.yaml) | исторический пример workflow, не подключённый к текущему CI |
 
-Если с вашей машины SSH и сайт доступны, то же самое делает `deploy/vm-build.sh` (архив по SSH, сборка на ВМ).
+## Локальная проверка
 
-Сервисное подключение SourceCraft видит только облака организации, к которой привязан репозиторий, а секреты репозитория в CI хакатона не подставляются, поэтому автоматическая выкатка из CI ([`ci-cloud.yaml`](ci-cloud.yaml)) не включена.
+Из корня репозитория, Bash с установленным Python и Docker:
 
-Почему ВМ, а не Serverless Containers: там запрос ограничен 3,5 МБ, а записи проездов — гигабайты, и обработка идёт через долгое WebSocket-соединение.
-
+```sh
+python scripts/make_sample_bag.py results/web-smoke/sample_obstacle
+docker build -f deploy/Dockerfile.web -t gabarit-web .
+docker run --rm --name gabarit-web -p 127.0.0.1:8000:8000 \
+  -v "$PWD/results/web-smoke:/data/bags:ro" \
+  -v gabarit-demo-uploads:/data/uploads \
+  -e GABARIT_ADMIN_PASSWORD \
+  gabarit-web
 ```
-git archive ──► Object Storage (приватный бакет) ──► ВМ gabarit-demo: контейнер-сборщик
-                                                    │  docker build -f deploy/Dockerfile.web
-                                                    ▼
-                          Container Registry ◄── push   ──► сайт :80 (образ по digest)
+
+Откройте [localhost:8000](http://localhost:8000), выберите запись и профиль Pandar. При прямом запуске демо создаёт первая команда; облачный Compose создаёт его автоматически. Именованный том хранит загрузки между запусками. Для собственного пароля панели `/admin` заранее задайте `GABARIT_ADMIN_PASSWORD` в окружении; логин — `admin`.
+
+При недоступности основного registry можно передать другой базовый источник:
+
+```sh
+docker build -f deploy/Dockerfile.web --build-arg BASE=mirror.gcr.io/library/python:3.11-slim -t gabarit-web .
 ```
 
-## Работа
+Недоступность Docker Hub и ROS-репозиториев наблюдалась при прежнем развёртывании; состояние сети сейчас не проверялось. Полный локальный ROS-образ собирается из корневого [Dockerfile](../Dockerfile).
 
-- Интерфейс: `http://<IP>`, панель администратора: `http://<IP>/admin` (логин `admin`, пароль из секрета).
-- Одновременно работает один пользователь, остальные видят «Сервис занят».
-- Данные на ВМ: `/var/lib/gabarit/bags` (скопированные записи), `/var/lib/gabarit/uploads` (загруженные из браузера), `/var/lib/gabarit/artifacts` (журнал оператора, версии параметров); переживают обновления образа.
-- SSH: `ssh -i ~/.ssh/gabarit_demo yc-user@<IP>`, логи: `sudo docker logs -f gabarit`.
-- Остановить ВМ, когда демо не нужно: `yc compute instance stop gabarit-demo` (диск и IP оплачиваются и при остановленной ВМ), запустить: `yc compute instance start gabarit-demo`.
-- MLflow в облаке не устанавливается: оценки пишутся в локальный журнал администратора.
+## Модели и режимы
+
+Лёгкий образ читает bag напрямую и запускает `web.server` на порту 8000. В него копируются ядро, конфигурации, скрипты и тестовые fixtures. Собственный лес поставляется в `gabarit/models` и исполняется через NumPy; scikit-learn нужен только для обучения.
+
+Для явного выбора конфигурации передайте после имени образа полный набор аргументов: `--data /data/bags --uploads /data/uploads --config /opt/gabarit/config/component_trained_fast.yaml`. Этот профиль рассчитан на Pandar. Для Falcon сохраняйте правильные оси его профиля и явно объединяйте раздел `models`.
+
+FarBevNet не обеспечен PyTorch и checkpoint в лёгком образе. Нейросетевые контейнеры описаны в [MODELS.md](../docs/MODELS.md). Скорость коротких ROS-прогонов не переносится на облачную ВМ или веб-образ без отдельного измерения.
+
+## Облачные сценарии
+
+Требуются Bash, настроенный `yc`, SSH/SCP и права в выбранном облаке. Сценарии создают или изменяют реальные ресурсы. Параметры `yc-setup.sh` по умолчанию: `gabarit-demo`, `ru-central1-a`, 4 vCPU, 8 ГБ памяти, SSD 100 ГБ. Их меняют `VM`, `ZONE`, `CORES`, `MEMORY`, `DISK_GB` и `SSH_KEY`. Это значения сценария, а не измеренные требования к производительности.
+
+`GABARIT_ADMIN_PASSWORD` обязателен для облачных сценариев; `yc-setup.sh` допускает буквы, цифры, `_` и `-`. Шаблон Compose содержит `__IMAGE__` и `__ADMIN_PASSWORD__`. Готовую спецификацию с паролем и ключи сервисных аккаунтов не добавляйте в Git.
+
+`vm-build.sh` использует `git archive HEAD`: незакоммиченные изменения в сборку не попадут. Он собирает образ на ВМ, отправляет его в реестр и сохраняет digest. Затем нужно проверить реально запущенный образ, состояние контейнера и интерфейс.
+
+## Обновление контейнера и ограничения
+
+Старые сценарии используют `add-metadata` для существующей ВМ. Это не следует считать подтверждением переключения работающего контейнера. Для явного обновления используется документированная команда:
+
+```sh
+yc compute instance update-container --name gabarit-demo --docker-compose-file results/deploy/compose.yaml
+```
+
+Предварительно подготовьте `results/deploy/compose.yaml` из шаблона, подставив свой образ, желательно по digest, и пароль. Сохраняйте файл в локальном `results`, исключённом из Git. Синтаксис сверён с [официальной справкой Yandex Cloud](https://yandex.cloud/en/docs/compute/cli-ref/instance/update-container); развёртывание текущей версии не выполнялось.
+
+`ci-cloud.yaml` — исторический пример. Текущая [.sourcecraft/ci.yaml](../.sourcecraft/ci.yaml) выполняет проверки и ручные прогоны записей; push не означает автоматической выкатки демо. Пример облачного CI также ссылается на полный корневой Dockerfile, тогда как облачный Compose рассчитан на лёгкий образ. Перед активацией нужно согласовать образ, entrypoint, секреты и обновление ВМ. Прежние комментарии об автоматической выкатке не описывают текущую настройку.
+
+## Данные и диагностика
+
+| Каталог ВМ | Назначение |
+|---|---|
+| `/var/lib/gabarit/bags` | скопированные записи |
+| `/var/lib/gabarit/uploads` | записи из браузера |
+| `/var/lib/gabarit/artifacts` | локальные журналы, версии параметров и кеш |
+
+Шаблон публикует порт как `80:8000`, допускает одного пользователя и автоматически перезапускает контейнер. Данные вынесены в host mounts. MLflow в лёгкий образ не входит; приложение использует локальный журнал.
+
+```sh
+yc compute instance get --name gabarit-demo
+yc compute instance get-serial-port-output --name gabarit-demo
+```
+
+На ВМ доступны `sudo docker logs --tail 100 gabarit` и `sudo docker inspect gabarit`. `upload-bag.sh` заменяет существующий одноимённый каталог и перезапускает сервис; новый bag также можно загрузить через интерфейс. Наличие конфигураций в репозитории не подтверждает доступность сайта или состав работающих облачных ресурсов.
