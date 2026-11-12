@@ -15,6 +15,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DISPLAY=:99 \
     RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
+# Limit Mesa's software renderer, independently of scan processing.
+ENV LP_NUM_THREADS=2
+
 # CycloneDDS: point clouds of the dataset are 8-24 MB per message; the default
 # FastDDS profile drops them on large fragmented transfers.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -23,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-humble-visualization-msgs ros-humble-sensor-msgs ros-humble-std-srvs \
         ros-humble-rmw-cyclonedds-cpp ros-humble-rviz2 \
         ros-humble-rosbag2-storage-mcap ros-humble-rosbag2-compression-zstd \
-        xvfb x11vnc novnc websockify fluxbox x11-utils libgl1-mesa-dri \
+        xvfb x11vnc novnc websockify fluxbox feh x11-utils libgl1-mesa-dri \
     && rm -rf /var/lib/apt/lists/*
 
 # NumPy >= 1.25 is required for fast ufunc.at. Keep NumPy 1.x in the Humble
@@ -46,6 +49,7 @@ COPY gabarit ./gabarit
 COPY web ./web
 COPY scripts ./scripts
 COPY config ./config
+ENV CYCLONEDDS_URI=file:///opt/gabarit/config/cyclonedds.xml
 COPY tests ./tests
 COPY docker ./docker
 COPY ros2 ./ros_ws/src

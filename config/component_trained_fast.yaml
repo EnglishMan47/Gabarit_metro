@@ -1,0 +1,7 @@
+# Optional calibrated objectness support, still gated by geometry and beam support.
+models:
+  component_weights: gabarit/models/component_forest_v1.json
+  component_policy: assist
+  component_min_score: 0.9901312175192601
+  component_min_hits: 2
+  component_support_confirmation: true

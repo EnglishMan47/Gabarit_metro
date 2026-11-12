@@ -18,6 +18,7 @@ import math
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from importlib.resources import files
+from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
@@ -119,13 +120,59 @@ def _load_forest() -> tuple[tuple[dict[str, Any], ...], float]:
 
 
 class ComponentModel:
-    """Dependency-free (apart from existing NumPy) inference of original weights."""
+    """Dependency-free inference of original or independently trained weights."""
 
-    def __init__(self) -> None:
-        self.trees, self.threshold = _load_forest()
+    def __init__(self, model_path: str | Path | None = None) -> None:
+        self.name = "baseline_v3_assist_score"
+        self.source_revision = SOURCE_REVISION
+        self.weight_sha256 = MODEL_SHA256
+        self.assist_available = True
+        self.fallback_reason = None
+        self._feature_float32 = False
+        if model_path is None:
+            self.trees, self.threshold = _load_forest()
+            return
+        path = Path(model_path)
+        if path.stat().st_size > 5 * 1024 * 1024:
+            raise ValueError("component model exceeds size limit")
+        raw = path.read_bytes()
+        model = json.loads(raw)
+        if (model.get("format") != "gabarit-component-forest-v1" or
+                tuple(model.get("features", ())) != FEATURE_NAMES or
+                model.get("aggregation") != "mean_tree_probability"):
+            raise ValueError("unsupported trained component forest contract")
+        trees = model.get("trees")
+        if not isinstance(trees, list) or not 1 <= len(trees) <= 128:
+            raise ValueError("invalid trained component forest size")
+        for tree in trees:
+            _validate_node(tree)
+        threshold = model.get("threshold")
+        if not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
+            raise ValueError("invalid trained component forest threshold")
+        self.trees, self.threshold = tuple(trees), float(threshold)
+        self._feature_float32 = True  # sklearn's tree inference input contract
+        self.weight_sha256 = hashlib.sha256(raw).hexdigest()
+        self.name = "gabarit_trained_component_score"
+        self.source_revision = self.weight_sha256[:16]
+        if model.get("training", {}).get("calibration_zero_false_positives") is not True:
+            self.assist_available = False
+            self.fallback_reason = "trained model did not pass independent calibration"
+
+    @classmethod
+    def optional(cls, model_path: str | Path | None = None) -> "ComponentModel":
+        """Missing optional weights never enable an unintended assist model."""
+        try:
+            return cls(model_path)
+        except (OSError, ValueError, TypeError, RecursionError) as error:
+            fallback = cls()
+            fallback.assist_available = False
+            fallback.fallback_reason = f"{type(error).__name__}: {error}"
+            return fallback
 
     def predict(self, features: ComponentFeatures) -> ComponentPrediction:
         values = features.vector()
+        if self._feature_float32:
+            values = tuple(float(value) for value in np.asarray(values, dtype=np.float32))
         if not all(math.isfinite(value) for value in values):
             raise ValueError("component features must be finite")
         score = 0.0
@@ -192,8 +239,8 @@ class ComponentModelAssistant:
     @staticmethod
     def _geometry_reason(candidate: Any, prediction: ComponentPrediction, *,
                          observed_until_m: float, path_reliable: bool,
-                         half_width_m: float) -> str:
-        if candidate.rejected != "low_score":
+                         half_width_m: float, support_accepted: bool = False) -> str:
+        if candidate.rejected != "low_score" and not (support_accepted and candidate.rejected is None):
             return "existing_acceptance" if candidate.rejected is None else "protected_rejection"
         if candidate.low or candidate.transparent or candidate.single_beam:
             return "special_geometry_branch"
@@ -245,7 +292,8 @@ class ComponentModelAssistant:
     def apply(self, candidates: Iterable[Any], source_xyz: np.ndarray, *, stamp: float,
               observed_until_m: float, path_reliable: bool, policy: str = "score",
               min_score: float = 0.90, min_hits: int = 3, half_width_m: float = 1.05,
-              forward_delta_m: float = 0.0) -> dict[str, Any]:
+              forward_delta_m: float = 0.0, support_confirmation: bool = False,
+              path: Any = None, max_path_sigma: float = 0.3) -> dict[str, Any]:
         if policy not in {"off", "score", "assist"}:
             raise ValueError("component policy must be off, score or assist")
         if not math.isfinite(min_score) or not 0 <= min_score <= 1:
@@ -259,12 +307,19 @@ class ComponentModelAssistant:
         if not math.isfinite(half_width_m) or half_width_m <= 0.10:
             raise ValueError("component corridor half-width must exceed margin")
         threshold = max(min_score, self.model.threshold)
+        if not math.isfinite(max_path_sigma) or max_path_sigma <= 0:
+            raise ValueError("component maximum path sigma must be positive and finite")
+        requested_policy = policy
+        if policy == "assist" and not self.model.assist_available:
+            policy = "score"
         result: dict[str, Any] = {
-            "name": "baseline_v3_assist_score", "source_revision": SOURCE_REVISION,
+            "name": self.model.name, "source_revision": self.model.source_revision,
+            "weight_sha256": self.model.weight_sha256,
             "score_kind": "uncalibrated_assist_score", "policy": policy,
+            "requested_policy": requested_policy, "fallback_reason": self.model.fallback_reason,
             "model_threshold": self.model.threshold, "threshold": threshold,
             "min_hits": min_hits, "evaluated": 0, "eligible": 0,
-            "promoted": 0, "unavailable": 0, "candidates": [],
+            "promoted": 0, "supported": 0, "unavailable": 0, "candidates": [],
         }
         if policy == "off":
             self.reset()
@@ -275,6 +330,9 @@ class ComponentModelAssistant:
         used: set[int] = set()
         current: list[_History] = []
         for candidate in candidates:
+            # Support belongs to this scan, not a previously reused candidate.
+            if "gabarit_component_supported" in candidate.reasons:
+                candidate.reasons.remove("gabarit_component_supported")
             candidate.component_model_score = None
             item: dict[str, Any] = {
                 "id": int(candidate.id), "promoted": False, "hits": 0,
@@ -297,7 +355,17 @@ class ComponentModelAssistant:
             reason = self._geometry_reason(
                 candidate, prediction, observed_until_m=observed_until_m,
                 path_reliable=path_reliable, half_width_m=half_width_m,
+                support_accepted=(support_confirmation and self.model.name == "gabarit_trained_component_score"
+                                  and self.model.assist_available),
             )
+            accepted_support = candidate.rejected is None and reason == "eligible"
+            if accepted_support:
+                if path is None:
+                    reason = "missing_path_uncertainty"
+                else:
+                    sigma = float(np.interp(.5 * (candidate.s_near + candidate.s_far), path.s, path.sig_c))
+                    if not math.isfinite(sigma) or sigma > max_path_sigma:
+                        reason = "uncertain_path"
             if reason == "eligible" and prediction.score < threshold:
                 reason = "below_score_threshold"
             item["reason"] = reason
@@ -312,11 +380,18 @@ class ComponentModelAssistant:
                 item["hits"] = hits
                 current.append(_History(bounds, hits))
                 if policy == "assist" and hits >= min_hits:
-                    candidate.rejected = None
-                    if "sakhalin_ai_component_assist" not in candidate.reasons:
-                        candidate.reasons.append("sakhalin_ai_component_assist")
-                    item["promoted"] = True
-                    result["promoted"] += 1
+                    if accepted_support:
+                        candidate.reasons.append("gabarit_component_supported")
+                        item["supported"] = True
+                        result["supported"] += 1
+                    else:
+                        candidate.rejected = None
+                        tag = ("gabarit_component_assist" if self.model.name == "gabarit_trained_component_score"
+                               else "sakhalin_ai_component_assist")
+                        if tag not in candidate.reasons:
+                            candidate.reasons.append(tag)
+                        item["promoted"] = True
+                        result["promoted"] += 1
             result["candidates"].append(item)
         # A missed/ineligible scan breaks confirmation. A new component cannot
         # borrow another component's score or accumulated frame count.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import time
+from pathlib import Path
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -18,7 +19,7 @@ import numpy as np
 from gabarit import limit_blas_threads
 from gabarit.cloud import Cloud, from_raw
 from gabarit.config import Config
-from gabarit.component_model import ComponentModelAssistant
+from gabarit.component_model import ComponentModel, ComponentModelAssistant
 from gabarit.detect import Candidate, FrameGeometry, detect, track_coordinates
 from gabarit.egomotion import EgoMotion, propagate_track
 from gabarit.rosbag import RawCloud
@@ -59,12 +60,16 @@ class Pipeline:
         self.last_stamp: float | None = None
         self.source_frame_id: str | None = None
         self.turnout_hist: list = []
-        self.component_model = ComponentModelAssistant() if self.cfg.models.component_policy != "off" else None
+        self.component_model = None
+        if self.cfg.models.component_policy != "off":
+            component_weights = Path(self.cfg.models.component_weights) if self.cfg.models.component_weights else None
+            if component_weights is not None and not component_weights.is_absolute():
+                component_weights = Path(__file__).resolve().parents[1] / component_weights
+            self.component_model = ComponentModelAssistant(ComponentModel.optional(component_weights))
         self.path_advisor = None
         self.last_inference_stamp: float | None = None
         self.path_fusion = FarPathFusion(self.cfg.models)
         if self.cfg.models.learned_path:
-            from pathlib import Path
             from gabarit.learned_path import FarBevAdvisor
             weights = Path(self.cfg.models.far_path_weights)
             if not weights.is_absolute():
@@ -221,7 +226,8 @@ class Pipeline:
                 path_reliable=bool(track.rail.any() and track.calibration.get("valid", False)),
                 policy=cfg.models.component_policy, min_score=cfg.models.component_min_score,
                 min_hits=cfg.models.component_min_hits, half_width_m=cfg.envelope.width / 2.0,
-                forward_delta_m=delta,
+                forward_delta_m=delta, support_confirmation=cfg.models.component_support_confirmation,
+                path=track, max_path_sigma=cfg.tracking.far_lateral_std,
             )
             component_ms = (time.perf_counter() - t_component) * 1000.0
         t3 = time.perf_counter()

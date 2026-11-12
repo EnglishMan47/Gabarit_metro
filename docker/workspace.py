@@ -73,8 +73,12 @@ class Workspace:
         defaults = Path("/etc/X11/fluxbox/init")
         settings = defaults.read_text() if defaults.exists() else ""
         settings = "\n".join(line for line in settings.splitlines()
-                             if not line.startswith(("session.screen0.rootCommand:", "session.screen0.toolbar.visible:")))
-        wm_init.write_text(settings + "\nsession.screen0.rootCommand: true\nsession.screen0.toolbar.visible: false\n")
+                             if not line.startswith(("session.styleOverlay:", "session.screen0.toolbar.visible:")))
+        # Fluxbox 1.3 ignores the old rootCommand resource. Its style overlay
+        # is the supported way to prevent fbsetbg starting a modal xmessage.
+        overlay = wm_init.parent / "overlay"
+        overlay.write_text("background: none\n")
+        wm_init.write_text(settings + f"\nsession.styleOverlay: {overlay}\nsession.screen0.toolbar.visible: false\n")
         self.spawn("window manager", ["fluxbox", "-rc", str(wm_init)])
         self.spawn("VNC", ["x11vnc", "-display", ":99", "-rfbport", "5900", "-forever",
                            "-shared", "-localhost", "-nopw", "-quiet"])

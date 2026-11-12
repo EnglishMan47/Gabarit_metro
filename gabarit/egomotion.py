@@ -44,21 +44,33 @@ def occupancy(lev: np.ndarray) -> np.ndarray:
 
 
 def _score(prev: np.ndarray, cur: np.ndarray, shifts: np.ndarray) -> np.ndarray:
+    """Overlap-normalised correlation for all shifts, without rescanning images.
+
+    FFT supplies cross products; prefix sums supply the mean and energy of
+    each overlapping region. Global centring first avoids cancellation for
+    nearly uniform surfaces and does not change a centred correlation.
+    """
+    a = np.asarray(prev, dtype=np.float64)
+    b = np.asarray(cur, dtype=np.float64)
+    a, b = a-a.mean(), b-b.mean()
+    nfft = 1 << (2*NF-1).bit_length()
+    cross = np.fft.irfft((np.fft.rfft(a, n=nfft, axis=0) *
+                         np.conj(np.fft.rfft(b, n=nfft, axis=0))).sum(axis=1), n=nfft)
+    def prefix(image):
+        return (np.r_[0., np.cumsum(image.sum(axis=1))],
+                np.r_[0., np.cumsum(np.square(image).sum(axis=1))])
+    sa, qa = prefix(a)
+    sb, qb = prefix(b)
+    valid = NF-np.abs(shifts) >= NF//3
+    sh = shifts[valid]
+    count = (NF-np.abs(sh))*NX
+    a0, a1 = np.maximum(sh, 0), NF+np.minimum(sh, 0)
+    b0, b1 = np.maximum(-sh, 0), NF-np.maximum(sh, 0)
+    suma, sumb = sa[a1]-sa[a0], sb[b1]-sb[b0]
+    va = np.maximum(qa[a1]-qa[a0]-suma*suma/count, 0.)
+    vb = np.maximum(qb[b1]-qb[b0]-sumb*sumb/count, 0.)
     out = np.full(len(shifts), -np.inf)
-    for k, sh in enumerate(shifts):
-        # structure at f in prev appears at f - sh in cur
-        if sh >= 0:
-            a = prev[sh:]
-            b = cur[: NF - sh]
-        else:
-            a = prev[: NF + sh]
-            b = cur[-sh:]
-        if len(a) < NF // 3:
-            continue
-        am = a - a.mean()
-        bm = b - b.mean()
-        den = math.sqrt(float((am * am).sum() * (bm * bm).sum())) + 1e-6
-        out[k] = float((am * bm).sum()) / den
+    out[valid] = (cross[sh % nfft]-suma*sumb/count) / (np.sqrt(va*vb)+1e-6)
     return out
 
 

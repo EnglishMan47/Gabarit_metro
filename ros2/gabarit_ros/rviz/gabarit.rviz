@@ -3,7 +3,6 @@ Panels:
     Name: Displays
 Visualization Manager:
   Class: ""
-  Frame Rate: 10
   Displays:
     - Class: rviz_default_plugins/Grid
       Name: Grid
@@ -35,6 +34,7 @@ Visualization Manager:
       Topic:
         Value: /gabarit/view_markers
   Global Options:
+    Frame Rate: 10
     Fixed Frame: gabarit_view
     Background Color: 12; 16; 22
   Views:

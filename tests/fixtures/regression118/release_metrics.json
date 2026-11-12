@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "scope": "Frozen synthetic scenes on two recording backgrounds, not a claim of universal FP/FN absence",
+  "baseline": {
+    "cases": 118,
+    "positive_cases": 112,
+    "detected": 112,
+    "eligible_missed_frames": 683,
+    "post_confirmation_missed_frames": 0,
+    "extra_alarm_frames": 5,
+    "negative_cases": 6,
+    "negative_alarm_frames": 0
+  },
+  "default": {
+    "cases": 118,
+    "positive_cases": 112,
+    "detected": 112,
+    "eligible_missed_frames": 665,
+    "post_confirmation_missed_frames": 0,
+    "extra_alarm_frames": 0,
+    "negative_cases": 6,
+    "negative_alarm_frames": 0
+  },
+  "own_component_profile": {
+    "cases": 118,
+    "positive_cases": 112,
+    "detected": 112,
+    "eligible_missed_frames": 664,
+    "post_confirmation_missed_frames": 0,
+    "extra_alarm_frames": 0,
+    "negative_cases": 6,
+    "negative_alarm_frames": 0
+  },
+  "source_sha256": {
+    "gabarit/__init__.py": "cfe8c43bc66d2ec1f5ea159d9b9a7db8e281a261f0e8488b88173d8539955ad9",
+    "gabarit/__main__.py": "ae4cb0de5eb853611b672d3885df0a364c11357619641d912369db86b9429ff4",
+    "gabarit/annotation_sources.py": "791eeeb6f577c8e20d376f4329bacf574c7b920aa660af3aba68251c68449fee",
+    "gabarit/cloud.py": "5ee523068cdb5fc19335f9ffd9c448eadb2e683b0a1f18a347f0ae84f609f5f4",
+    "gabarit/component_model.py": "15ccb1712332f915887fd58618e05c0d94c83bbd74df7a0a852aaf3855576ed5",
+    "gabarit/config.py": "dbfb23af974861685ccf54d1ffa5b8925d5134a155d3ae21ab2a25e71c4ab22e",
+    "gabarit/detect.py": "f07e6ec103199833a77411c95cdb47fbe67d20878b625ff3cf332f6bd83b48a5",
+    "gabarit/egomotion.py": "d9f6ea20dc7cb35db538f4dcb30e236a24e315bdf039a81484ab406c21b1aa78",
+    "gabarit/evaluation.py": "59f3e2e06ac72fa8881402617f199846e70c6e4fe8f44facab69278a36f7e354",
+    "gabarit/filtering.py": "7314105876fe0860a429c2f37ac5b680b51bb709650ca6d80d516f9a8a385471",
+    "gabarit/learned_path.py": "de1dbafbab2ed01113327ac40582eab562c8a016d1b651d003222e582ff358c9",
+    "gabarit/mlops.py": "7c71d3d6d319845fabd8efe793d32563d547c67137b0015d3541e021ff654db6",
+    "gabarit/numerics.py": "6837cec96e600ec4a365f6fab945c75e8082f937cec5b4d9b671cc63454cf5b1",
+    "gabarit/path_fusion.py": "33a509d0d245227b4e3d7c5e9e9d251b9b63557bc91571f95fdbbc09b20a6f0c",
+    "gabarit/pipeline.py": "776f817b346591dc97e519fbb1bcd47f4cf013990dd0fcadac47f3fdd57b187d",
+    "gabarit/rosbag.py": "8b61e827560d170f4388afeab1187a1b1f154fd9e2d451b6cef128e91c8f9b98",
+    "gabarit/synth.py": "02b5f8b42b513b636740bae2a17f6d78c24ad37f7d3ac15979c48ba71040e55e",
+    "gabarit/track.py": "267405f42e35ba95235e1b247d5e2ce483fdc27d9d6583dd568245709403e44d",
+    "gabarit/tracker.py": "f10f47f0c713400459eb68bd542f35125efb6516f283aa473ea96c39f49d0bc8",
+    "gabarit/vendor/attention_please/__init__.py": "5e3ba0c4d3b96be47c970b1df3727114053d71352a0279f609d8cf2b1d4a68fd",
+    "gabarit/vendor/attention_please/blocks.py": "b1846d53878f3a283b658fb6f99d30a9aecc0c9ef1baee4db126ca4b8072151e",
+    "gabarit/vendor/attention_please/far_bev_net.py": "e0c6c391077e9ea1aad31d6d0ea1c3817712a2a97f500c4f28a64d36ecf32b6f",
+    "gabarit/vendor/attention_please/geometry.py": "3c72e2dfaefd5827a8c3f798c918d93690044687bbecd8fc4aa40eefa26833f4",
+    "gabarit/vendor/sakhalin_ai/__init__.py": "986bc1a10b41081d1faa64312692f5b5c18d240ffdee135f9fe7a3d7f8fee87a",
+    "gabarit/models/component_forest_v1.json": "5ab797b3e8cfc032a4e334e49a2e5831f6a3acbaec3156cca8c60effb41502d0",
+    "scripts/synthetic_eval.py": "a6a7d37e908e7cfa6beee3c9f34299a9c132ee481a4354a61309d08c2acb55bc",
+    "scripts/synthetic_reference.py": "c87de7fdb44e8d949c81123d3d3c2ac9bc831fd16f63c804fa827ab4c4a6c7af"
+  }
+}

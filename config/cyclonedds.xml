@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Large bag clouds are exchanged locally inside the container.
+     https://cyclonedds.io/docs/cyclonedds/0.10.2/config/cyclonedds_specifics.html
+     No interface restrictions, input downsampling or host sysctl changes. -->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain Id="any">
+    <General>
+      <MaxMessageSize>65500B</MaxMessageSize>
+      <FragmentSize>60000B</FragmentSize>
+    </General>
+    <Internal>
+      <SocketReceiveBufferSize min="64KiB" max="4MiB"/>
+      <SocketSendBufferSize min="64KiB" max="4MiB"/>
+      <Watermarks>
+        <WhcLow>16MiB</WhcLow>
+        <WhcHighInit>32MiB</WhcHighInit>
+        <WhcHigh>64MiB</WhcHigh>
+      </Watermarks>
+    </Internal>
+  </Domain>
+</CycloneDDS>

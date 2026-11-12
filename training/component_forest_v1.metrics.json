@@ -1,0 +1,92 @@
+{
+  "train": {
+    "rows": 4313,
+    "positive": 1082,
+    "true_positive": 789,
+    "false_positive": 0,
+    "precision": 1.0,
+    "recall": 0.7292051756007394,
+    "roc_auc": 0.9999322071132759,
+    "threshold": 0.9901312175192601
+  },
+  "calibration": {
+    "rows": 2748,
+    "positive": 495,
+    "true_positive": 333,
+    "false_positive": 0,
+    "precision": 1.0,
+    "recall": 0.6727272727272727,
+    "roc_auc": 0.999003797405928,
+    "threshold": 0.9901312175192601
+  },
+  "test": {
+    "rows": 2225,
+    "positive": 454,
+    "true_positive": 291,
+    "false_positive": 0,
+    "precision": 1.0,
+    "recall": 0.6409691629955947,
+    "roc_auc": 0.9963620941402975,
+    "threshold": 0.9901312175192601
+  },
+  "whole_bag_split": {
+    "train": [
+      "doubleT_platform"
+    ],
+    "calibration": [
+      "roundT_squareT_pressureGate_squareT"
+    ],
+    "test": [
+      "roundT_pressureGate_roundT"
+    ]
+  },
+  "feature_names": [
+    "point_count",
+    "extent_x_m",
+    "extent_y_m",
+    "extent_z_m",
+    "volume_m3",
+    "density_points_per_m3",
+    "centroid_distance_m",
+    "nearest_distance_m"
+  ],
+  "candidate_rejections": {
+    "train": {
+      "accepted": 730,
+      "longitudinal_structure": 11,
+      "elongated_structure": 129,
+      "low_score": 84,
+      "ground": 9,
+      "sparse": 88,
+      "wall_line": 21,
+      "far_weak": 1,
+      "line_far": 4,
+      "side_fixture_row": 1,
+      "isolated_returns": 2,
+      "oblique_surface": 2
+    },
+    "calibration": {
+      "accepted": 335,
+      "elongated_structure": 31,
+      "sparse": 60,
+      "ground": 11,
+      "isolated_returns": 1,
+      "low_score": 35,
+      "oblique_surface": 16,
+      "wall_line": 2,
+      "longitudinal_structure": 4
+    },
+    "test": {
+      "accepted": 373,
+      "wall_attached": 3,
+      "low_score": 19,
+      "ground": 1,
+      "longitudinal_structure": 3,
+      "elongated_structure": 29,
+      "isolated_returns": 18,
+      "wall_line": 6,
+      "sparse": 1,
+      "side_fixture_row": 1
+    }
+  }
+}

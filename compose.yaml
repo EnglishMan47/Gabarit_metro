@@ -16,8 +16,10 @@ services:
       GABARIT_CACHE_MAX_GB: ${GABARIT_CACHE_MAX_GB:-16}
       GABARIT_CONFIG: /opt/gabarit/config/${GABARIT_CONFIG_FILE:-gabarit.yaml}
       LIBGL_ALWAYS_SOFTWARE: "${LIBGL_ALWAYS_SOFTWARE:-1}"
+      LP_NUM_THREADS: "${LP_NUM_THREADS:-2}"
       QT_X11_NO_MITSHM: "1"
       ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+      CYCLONEDDS_URI: "${CYCLONEDDS_URI:-file:///opt/gabarit/config/cyclonedds.xml}"
     volumes:
       - type: bind
         source: ${GABARIT_BAGS:-./data}

@@ -26,6 +26,7 @@ import os
 import shutil
 import socket
 import sqlite3
+import threading
 import subprocess
 import sys
 import time
@@ -56,8 +57,11 @@ def cfg_hash(cfg: Config) -> str:
     for path in sorted((PROJECT / "gabarit").rglob("*.py")):
         digest.update(path.relative_to(PROJECT).as_posix().encode())
         digest.update(path.read_bytes())
-    if cfg.models.learned_path:
-        weights = Path(cfg.models.far_path_weights)
+    paths = ([cfg.models.far_path_weights] if cfg.models.learned_path else [])
+    if cfg.models.component_weights:
+        paths.append(cfg.models.component_weights)
+    for model_path in paths:
+        weights = Path(model_path)
         if not weights.is_absolute():
             weights = PROJECT / weights
         if weights.is_file():
@@ -119,23 +123,90 @@ class LiveHub:
         self.loop: asyncio.AbstractEventLoop | None = None
         self.last: bytes | None = None
         self.frames = 0
+        self._latest_frame = None
+        self._frame_lock = threading.Lock()
+        self._pending = {}
+        self._senders = {}
+        self._generation = 0
+        self._packing = False
 
-    def publish_threadsafe(self, payload: bytes) -> None:
+    def clear(self):
+        with self._frame_lock:
+            self.last = self._latest_frame = None
+            self._generation += 1
+
+    def publish_frame_threadsafe(self, result, meta) -> None:
+        # No viewer: retain one immutable frame for a paused-stream newcomer,
+        # without serializing a large point payload in the ROS callback.
+        with self._frame_lock:
+            self._latest_frame = (result, dict(meta))
+            self.last = None
+            self._generation += 1
+            schedule = bool(self.clients and self.loop is not None and not self._packing)
+            if schedule:
+                self._packing = True
+        if schedule:
+            self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self._pack_latest()))
+
+    async def _pack_latest(self):
+        # A single encoder owns at most one in-flight frame and one latest
+        # replacement. Rendering never serializes the ROS callback or queues
+        # an unbounded history when a viewer/network falls behind.
+        from web.session import pack_frame
+        try:
+            while True:
+                with self._frame_lock:
+                    frame, generation = self._latest_frame, self._generation
+                    if frame is None or not self.clients:
+                        self._packing = False
+                        return
+                payload = await asyncio.get_running_loop().run_in_executor(None, pack_frame, *frame)
+                await self._broadcast(payload, generation)
+                with self._frame_lock:
+                    if generation == self._generation:
+                        self._packing = False
+                        return
+        except BaseException:
+            with self._frame_lock:
+                self._packing = False
+            raise
+
+    def latest_payload(self):
+        with self._frame_lock:
+            payload, frame = self.last, self._latest_frame
+        if payload is not None:
+            return payload
+        if frame is not None:
+            from web.session import pack_frame
+            return pack_frame(*frame)
+        return None
+
+    def publish_threadsafe(self, payload: bytes, generation=None) -> None:
         if self.loop is None:
             return
-        self.loop.call_soon_threadsafe(asyncio.ensure_future, self._broadcast(payload))
+        self.loop.call_soon_threadsafe(asyncio.ensure_future, self._broadcast(payload, generation))
 
-    async def _broadcast(self, payload: bytes) -> None:
-        self.last = payload
+    async def _broadcast(self, payload: bytes, generation=None) -> None:
+        with self._frame_lock:
+            if generation is not None and generation != self._generation:
+                return
+            self.last = payload
         self.frames += 1
-        dead = []
         for ws in list(self.clients):
-            try:
-                await ws.send_bytes(payload)
-            except (ConnectionError, RuntimeError):
-                dead.append(ws)
-        for ws in dead:
+            self._pending[ws] = payload
+            if ws not in self._senders:
+                self._senders[ws] = asyncio.create_task(self._send_latest(ws))
+
+    async def _send_latest(self, ws):
+        try:
+            while ws in self.clients and ws in self._pending:
+                payload = self._pending.pop(ws)
+                await asyncio.wait_for(ws.send_bytes(payload), timeout=2.0)
+        except (ConnectionError, RuntimeError, asyncio.TimeoutError):
             self.clients.discard(ws)
+        finally:
+            self._pending.pop(ws, None)
+            self._senders.pop(ws, None)
 
 
 class App:
@@ -222,11 +293,12 @@ class App:
 
     async def _ws_live(self, ws: web.WebSocketResponse) -> web.WebSocketResponse:
         self.live.loop = asyncio.get_running_loop()
-        self.live.clients.add(ws)
         await ws.send_json({"type": "hello", "mode": "live", "config": self.base_cfg.to_dict(),
                             "sensor_profiles": sensor_profiles(self.base_cfg)})
-        if self.live.last:
-            await ws.send_bytes(self.live.last)
+        payload = await asyncio.get_running_loop().run_in_executor(self.pool, self.live.latest_payload)
+        if payload:
+            await ws.send_bytes(payload)
+        self.live.clients.add(ws)
         async for _ in ws:
             pass
         self.live.clients.discard(ws)

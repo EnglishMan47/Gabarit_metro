@@ -374,6 +374,26 @@ def _smooth_profile(x: np.ndarray, meas: list, prior: np.ndarray | None, prior_s
     return sol, sig, supported
 
 
+def _vertical_tail(s: np.ndarray, z: np.ndarray, observed: np.ndarray) -> np.ndarray:
+    """Continue an unmeasured tail with its last measured heading.
+
+    The third-difference penalty has a free quadratic mode. Extrapolating
+    that curvature beyond the last floor/rail/ceiling observation and then
+    recycling it as a temporal prior caused runaway heights. Keep every
+    measured station unchanged; a missing tail adds no curvature evidence.
+    The broad heading bound is a numerical guard, not a surveyed gradient.
+    """
+    known = np.flatnonzero(observed)
+    last = int(known[-1]) if len(known) else 0
+    if last == len(s)-1:
+        return z
+    anchor = max(0, int(np.searchsorted(s, s[last]-10.0))) if len(known) else min(10,len(s)-1)
+    slope = float(np.clip((z[last]-z[anchor]) / (s[last]-s[anchor]), -.1, .1)) if anchor != last else 0.0
+    out = z.copy()
+    out[last+1:] = z[last] + slope*(s[last+1:]-s[last])
+    return out
+
+
 # --------------------------------------------------------------------------
 # Track model
 
@@ -900,6 +920,7 @@ class TrackEstimator:
                                                lam=t.smooth_lateral, huber=2.0, side_steps=False)
         z_fit, sz_fit, obs_z = _smooth_profile(centres, rec_ver, prior_z, prior_sz, res[:, 3],
                                                lam=t.smooth_vertical, huber=2.0, side_steps=False)
+        z_fit = _vertical_tail(centres, z_fit, obs_z)
         if prior is not None and not _plausible(centres, c_fit):
             self.prev = None
             return self.estimate(xyz, None)

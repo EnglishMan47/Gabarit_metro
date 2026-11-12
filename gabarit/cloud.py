@@ -82,12 +82,21 @@ def working_set(cloud: Cloud, max_range: float = 205.0) -> np.ndarray:
                          cloud.columns, cloud.scan_pattern, cloud.dual_returns, max_range)
 
 
-def _working_mask(x, f, z, col, columns, scan_pattern, dual_returns, max_range):
+def _working_mask(x, f, z, col, columns, scan_pattern, dual_returns, max_range, organized_rings=0):
     """Shared by the public mask and conversion, before allocating xyz."""
     keep = (f > -1.0) & (f < max_range) & (np.abs(x) < 25.0) & (z > -4.0) & (z < 9.0)
     if scan_pattern == "mirror":
         # Mirror scan rows and returns are not mechanical adjacent columns.
         # Preserve this sparse, nonuniform ROI sampling, including near objects.
+        return keep
+    if organized_rings and len(f) == columns * organized_rings:
+        # Full column-major scans need no per-return division/modulo arrays.
+        # Public working_set() still handles arbitrary filtered clouds below.
+        mask = keep.reshape(columns, organized_rings)
+        forward = f.reshape(columns, organized_rings)
+        mask[1::2] &= forward[1::2] >= (40.0 if dual_returns else 12.0)
+        if dual_returns:
+            mask[2::4] &= forward[2::4] >= 12.0
         return keep
     if columns and dual_returns:
         keep &= (f >= 40.0) | (col % 2 == 0)
@@ -170,6 +179,26 @@ def dual_return_split(r2: np.ndarray, valid: np.ndarray, rings: int, columns: in
     return m.reshape(-1)
 
 
+def _selected_return_split(r2, valid, indices, rings, columns, gap=1.5):
+    """Same dual-echo decision, evaluating only retained ROI returns.
+
+    The partner still uses the original full-scan validity: a second echo
+    beyond the ROI can prove that a retained nearer return is transparent.
+    """
+    out = np.zeros(len(indices), bool)
+    if columns < 2 or not len(indices):
+        return out
+    col = indices // rings
+    partner = indices + np.where(col % 2 == 0, rings, -rings)
+    paired = (partner >= 0) & (partner < len(r2))
+    where = np.flatnonzero(paired)
+    i, j = indices[where], partner[where]
+    ok = valid[i] & valid[j]
+    where, i, j = where[ok], i[ok], j[ok]
+    out[where] = np.sqrt(r2[j]) - np.sqrt(r2[i]) >= gap
+    return out
+
+
 def from_raw(raw: RawCloud, forward_axis: str = "-y", min_range: float = 1.0, *,
              up_axis: str = "+z", scan_pattern: str = "mechanical", dual_returns: bool = True,
              elevation_resolution_deg: float = 0.125, working_range: float | None = None,
@@ -205,9 +234,11 @@ def from_raw(raw: RawCloud, forward_axis: str = "-y", min_range: float = 1.0, *,
     fwd = coords[fi] if fs > 0 else -coords[fi]
     up = coords[ui] if us > 0 else -coords[ui]
     n = len(arr)
-    r2 = lat * lat + fwd * fwd + up * up
-    valid = np.isfinite(r2) & (r2 > min_range * min_range)
     ring_key = next((key for key in ("ring", "channel") if key in names), None)
+    explicit_roi = working_range is not None and scan_pattern == "mechanical" and ring_key is not None
+    if not explicit_roi:
+        r2 = lat * lat + fwd * fwd + up * up
+        valid = np.isfinite(r2) & (r2 > min_range * min_range)
     if scan_pattern == "mirror":
         ring_all = np.full(n, -1, np.int16)
         if valid.any():
@@ -245,18 +276,53 @@ def from_raw(raw: RawCloud, forward_axis: str = "-y", min_range: float = 1.0, *,
         rings = int(ring_all.max()) + 1 if n and ring_all.max() >= 0 else 0
         organized = False
     columns = n // rings if organized else 0
-    col_all = (np.arange(n, dtype=np.int32) // rings) if organized else np.full(n, -1, np.int32)
-    split = dual_return_split(r2, valid, rings, columns) if organized and dual_returns else np.zeros(n, bool)
-    if working_range is not None:
-        # Same mask as cloud.subset(working_set(cloud)), with no intermediate
-        # copies of every valid point in dense 360-degree scans.
-        valid &= _working_mask(lat, fwd, up, col_all, columns, scan_pattern, dual_returns, working_range)
-    xyz = np.column_stack((lat[valid], fwd[valid], up[valid])).astype(np.float32, copy=False)
+    # Organized ROI conversion only needs column IDs for retained returns.
+    col_all = (None if organized and explicit_roi else
+               (np.arange(n, dtype=np.int32) // rings) if organized else np.full(n, -1, np.int32))
+    if explicit_roi:
+        # With explicit beam indices neither beam recovery nor validation
+        # needs the ranges of the 360-degree background. Compute only the ROI
+        # and its paired echoes, keeping exactly the original float32 order.
+        if organized:
+            # Cull forward range and redundant firings before gathering the
+            # other strided fields of a 360-degree, 24 MB structured cloud.
+            # Spatial/range validity below is identical to _working_mask().
+            keep = (fwd > -1.) & (fwd < working_range)
+            mask,forward = keep.reshape(columns,rings),fwd.reshape(columns,rings)
+            mask[1::2] &= forward[1::2] >= (40. if dual_returns else 12.)
+            if dual_returns:mask[2::4] &= forward[2::4] >= 12.
+        else:
+            keep = _working_mask(lat, fwd, up, col_all, columns, scan_pattern, dual_returns,working_range)
+        indices = np.flatnonzero(keep)
+        x, f, z = lat[indices], fwd[indices], up[indices]
+        selected_r2 = x*x + f*f + z*z
+        finite = ((np.abs(x)<25.) & (z>-4.) & (z<9.) & np.isfinite(selected_r2)
+                  & (selected_r2 > min_range*min_range))
+        indices, selected_r2 = indices[finite], selected_r2[finite]
+        split = np.zeros(len(indices), bool)
+        if organized and dual_returns and columns >= 2:
+            partner = indices + np.where((indices // rings) % 2 == 0, rings, -rings)
+            paired = np.flatnonzero((partner >= 0) & (partner < n))
+            other = partner[paired]
+            x, f, z = lat[other], fwd[other], up[other]
+            partner_r2 = x*x + f*f + z*z
+            ok = np.isfinite(partner_r2) & (partner_r2 > min_range*min_range)
+            split[paired[ok]] = np.sqrt(partner_r2[ok]) - np.sqrt(selected_r2[paired[ok]]) >= 1.5
+    else:
+        source_valid = valid
+        if working_range is not None:
+            valid = valid & _working_mask(lat, fwd, up, col_all, columns, scan_pattern, dual_returns,
+                                         working_range, rings if organized else 0)
+        indices = np.flatnonzero(valid)
+        split = (_selected_return_split(r2, source_valid, indices, rings, columns)
+                 if organized and dual_returns else np.zeros(len(indices), bool))
+    xyz = np.column_stack((lat[indices], fwd[indices], up[indices])).astype(np.float32, copy=False)
     intensity_key = next((key for key in ("intensity", "reflectivity", "reflectance") if key in names), None)
     if intensity_key is not None:
-        inten = scalar(intensity_key, np.float32)[valid]
+        inten = scalar(intensity_key, np.float32)[indices]
     else:
         inten = np.zeros(len(xyz), np.float32)
-    return Cloud(raw.stamp, raw.frame_id, xyz, inten, ring_all[valid], col_all[valid], n, rings, columns,
-                 split[valid], scan_pattern, bool(dual_returns and scan_pattern == "mechanical"),
-                 np.flatnonzero(valid) if preserve_source_index else None)
+    selected_columns = (indices//rings).astype(np.int32) if col_all is None else col_all[indices]
+    return Cloud(raw.stamp, raw.frame_id, xyz, inten, ring_all[indices], selected_columns, n, rings, columns,
+                 split, scan_pattern, bool(dual_returns and scan_pattern == "mechanical"),
+                 indices if preserve_source_index else None)

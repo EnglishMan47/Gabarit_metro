@@ -1,0 +1,8 @@
+# Optional own model; calibration/test backgrounds are disjoint from training.
+# Pandar axis defaults. Merge models into the Falcon profile for that sensor.
+models:
+  component_weights: gabarit/models/component_forest_v1.json
+  component_policy: assist
+  component_min_score: 0.9901312175192601
+  component_min_hits: 3
+  component_support_confirmation: true

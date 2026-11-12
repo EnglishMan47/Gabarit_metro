@@ -27,6 +27,7 @@ import math
 import struct
 import threading
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import rclpy
@@ -44,6 +45,7 @@ from gabarit.config import Config
 from gabarit.cloud import axis_transform
 from gabarit.pipeline import Pipeline
 from gabarit.rosbag import RawCloud, pointcloud2_array, decode_pointcloud2
+from gabarit_ros.render_worker import LatestRenderer
 
 
 def msg_to_raw(msg: PointCloud2) -> RawCloud:
@@ -131,6 +133,9 @@ class GabaritNode(Node):
         self.pub_points = self.create_publisher(PointCloud2, "/gabarit/obstacle_points", out_qos)
         self.pub_view_cloud = self.create_publisher(PointCloud2, "/gabarit/view_cloud", self._view_qos())
         self.pub_view_markers = self.create_publisher(MarkerArray, "/gabarit/view_markers", out_qos)
+        self._view_marker_counts = {}
+        self._view_worker = LatestRenderer(self._build_view, self._send_view,
+            lambda error:self.get_logger().error(f"visualization failed: {error}"))
         self.create_service(Trigger, "~/reset", self._reset)
 
         # Prefer reliable for large clouds when offered; a best-effort bag must
@@ -171,15 +176,18 @@ class GabaritNode(Node):
                 self.processed = self.dropped = 0
                 self.lat_hist.clear()
                 self._last_marker_counts.clear()
-            for publisher in (self.pub_markers, self.pub_view_markers):
-                publisher.publish(MarkerArray(markers=[Marker(action=Marker.DELETEALL)]))
+            def clear_markers():
+                self._view_marker_counts.clear()
+                for publisher in (self.pub_markers, self.pub_view_markers):
+                    publisher.publish(MarkerArray(markers=[Marker(action=Marker.DELETEALL)]))
+            self._view_worker.reset(clear_markers)
             self.pub_obst.publish(Bool(data=False))
             self.pub_dist.publish(Float32(data=math.nan))
             self.pub_free.publish(Float32(data=0.0))
             if self.web_app is not None:
                 self.web_app.base_cfg = cfg
             if self.hub is not None:
-                self.hub.last = None
+                self.hub.clear()
             self._discover()
             response.success = True
             response.message = f"pipeline reset; config: {path or 'defaults'}"
@@ -217,17 +225,17 @@ class GabaritNode(Node):
             if self._subscription_reliability[name] == reliability:
                 return
             self.destroy_subscription(self.subs.pop(name))
-        qos = QoSProfile(depth=1, reliability=reliability, history=HistoryPolicy.KEEP_LAST)
+        qos = QoSProfile(depth=4, reliability=reliability, history=HistoryPolicy.KEEP_LAST)
         # A generated Python PointCloud2 conversion walks the large byte
         # sequence before entering the callback. Decode CDR directly instead.
         self.subs[name] = self.create_subscription(PointCloud2, name, lambda msg: self._on_cloud(msg, name),
                                                     qos, raw=True)
         self._subscription_reliability[name] = reliability
-        self.get_logger().info(f"subscribed to {name} ({reliability.name}, depth=1)")
+        self.get_logger().info(f"subscribed to {name} ({reliability.name}, depth=4)")
 
     def _on_cloud(self, msg: PointCloud2, topic: str = "") -> None:
-        # the subscription keeps only the newest frame (depth 1): when the
-        # detector is slower than the sensor, stale clouds are skipped
+        # A small bounded history absorbs transport bursts. Sustained overload
+        # is still counted by the external source-stamp benchmark.
         if self.busy:
             self.dropped += 1
             return
@@ -247,10 +255,9 @@ class GabaritNode(Node):
             self._publish(header, res)
             t_outputs = time.perf_counter()
             if self.hub is not None:
-                from web.session import pack_frame
                 meta = dict(d)
                 meta.update({"type": "frame", "bag": "ROS 2", "synthetic": []})
-                self.hub.publish_threadsafe(pack_frame(res, meta))
+                self.hub.publish_frame_threadsafe(res, meta)
             end = time.perf_counter()
             d["latency_ms"] = round((end - t0) * 1000, 2)
             d["ros_timing_ms"] = {"input_decode": round((t_input - t0) * 1000, 2),
@@ -281,14 +288,32 @@ class GabaritNode(Node):
         # y=left, z=up, with the rail plane at z=0. Raw-frame outputs above
         # retain their original frame_id for ROS consumers.
         view_header = Header(stamp=header.stamp, frame_id="gabarit_view")
-        if self.get_parameter("publish_markers").value and self.pub_view_markers.get_subscription_count():
-            self.pub_view_markers.publish(self._markers(view_header, res, view=True))
-        if self.pub_view_cloud.get_subscription_count():
-            view_idx = view_indices(res.labels)
-            points = res.lev[view_idx][:, [1, 0, 2]]
-            self.pub_view_cloud.publish(xyz_cloud_cdr(view_header, points, res.cloud.intensity[view_idx]))
+        markers = self.get_parameter("publish_markers").value and self.pub_view_markers.get_subscription_count()
+        cloud = bool(self.pub_view_cloud.get_subscription_count())
+        if markers or cloud:
+            self._view_worker.submit((view_header,res,self.cfg,bool(markers),cloud))
         if d["obstacle"]:
             self.get_logger().warn(f"OBSTACLE {d['nearest_distance_m']:.1f} m ahead", throttle_duration_sec=1.0)
+
+    def _build_view(self, job):
+        header,res,cfg,draw_markers,draw_cloud=job
+        context=SimpleNamespace(cfg=cfg,_last_marker_counts=self._view_marker_counts)
+        markers=GabaritNode._markers(context,header,res,view=True) if draw_markers else None
+        cloud=None
+        if draw_cloud:
+            view_idx = view_indices(res.labels)
+            points = res.lev[view_idx][:, [1, 0, 2]]
+            cloud=xyz_cloud_cdr(header,points,res.cloud.intensity[view_idx])
+        return markers,cloud
+
+    def _send_view(self,payload):
+        markers,cloud=payload
+        if markers is not None:self.pub_view_markers.publish(markers)
+        if cloud is not None:self.pub_view_cloud.publish(cloud)
+
+    def destroy_node(self):
+        self._view_worker.close()
+        return super().destroy_node()
 
     def _to_sensor(self, lat: float, fwd: float, up: float, res) -> Point:
         """Levelled track coordinates -> original sensor frame (inverse levelling)."""

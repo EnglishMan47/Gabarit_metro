@@ -166,6 +166,8 @@ class TrackingConfig:
 class ModelsConfig:
     # The compact forest is NumPy-only; neural inference is an optional extra.
     component_policy: str = "score"
+    component_weights: str = ""
+    component_support_confirmation: bool = False
     component_min_score: float = 0.90
     component_min_hits: int = 3
     learned_path: bool = False
@@ -180,6 +182,8 @@ class ModelsConfig:
     path_confirmations: int = 2
 
     def __post_init__(self) -> None:
+        if not isinstance(self.component_weights, str):
+            raise ValueError("component_weights must be a path string")
         for name in ("component_min_hits", "path_interval", "path_confirmations"):
             if type(getattr(self, name)) is not int:
                 raise ValueError(f"{name} must be an integer")

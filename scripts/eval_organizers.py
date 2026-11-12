@@ -62,6 +62,7 @@ def main() -> int:
     pipe = Pipeline(cfg)
     args.out.mkdir(parents=True, exist_ok=True)
     rows = []
+    matched_track_ids: set[int] = set()
     n = len(reader) if args.stop is None else min(args.stop, len(reader))
     for i in range(n):
         ts, raw = reader.read(i)
@@ -74,6 +75,8 @@ def main() -> int:
         gt = gt_raw[cloud.source_index]
         res = pipe.process_cloud(cloud, ts * 1e-9, frame_index=i)
         d = res.data
+        if d.get("state_reset"):
+            matched_track_ids.clear()
         geo = res.geo
         objs = []
         gi = np.flatnonzero(gt & geo.in_range)
@@ -82,7 +85,7 @@ def main() -> int:
                 idx = gi[grp]
                 s, dd, hh = geo.s[idx], geo.d[idx], geo.h[idx]
                 inside = geo.corridor[idx]
-                rng = float(np.sqrt((res.lev[idx] ** 2).sum(axis=1)).min())
+                rng = float(np.linalg.norm(res.cloud.xyz[idx], axis=1).min())
                 o = {
                     "range_m": round(rng, 2), "s": [round(float(s.min()), 2), round(float(s.max()), 2)],
                     "d": [round(float(dd.min()), 2), round(float(dd.max()), 2)],
@@ -98,9 +101,18 @@ def main() -> int:
         # confirmed obstacles not explained by any synthetic object
         false = []
         false_obs = []
-        for ob in d["obstacles"]:
-            s0 = ob["s_m"]
-            if not any(o["s"][0] - 3.0 <= s0 <= o["s"][1] + 3.0 for o in objs):
+        for track in pipe.output_tracks:
+            if not track.confirmed:
+                continue
+            indices = track.cand.point_index
+            if track.misses == 0:
+                if indices is not None and gt[indices].any():
+                    matched_track_ids.add(track.id)
+                else:
+                    matched_track_ids.discard(track.id)
+            if track.id not in matched_track_ids:
+                ob = track.public()
+                s0 = ob["s_m"]
                 false.append(round(float(ob["distance_m"]), 1))
                 sig_c = float(np.interp(s0, res.track.s, res.track.sig_c))
                 false_obs.append({**ob, "sig_c": round(sig_c, 3)})
@@ -109,6 +121,7 @@ def main() -> int:
                      "false": false, "false_obs": false_obs})
         if i % 100 == 0:
             print(f"frame {i}/{n}", file=sys.stderr)
+    reader.close()
     with open(args.out / "frames.jsonl", "w", encoding="utf-8") as fh:
         for r in rows:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -146,11 +159,13 @@ def main() -> int:
                          round(float(np.median([o["h"][1] for _, o in obs])), 2)],
             "frames_inside": len(ins), "frames_seen": len(obs),
             "frames_confirmed": len(conf),
-            "first_confirmed_range_m": max(conf) if conf else None,
+            "first_confirmed_range_m": conf[0] if conf else None,
             "missed_reasons": dict(reasons.most_common(4)),
         })
     false_frames = [r["frame"] for r in rows if r["false"]]
     out = {"bag": str(args.bag), "frames": n, "objects": summary,
+           "matching": "actual_synthetic_return_overlap_and_confirmed_identity",
+           "ground_truth_scope": "dataset-specific appended synthetic returns; not general real-recording labels",
            "false_alarm_frames": len(false_frames),
            "false_alarm_ranges": sorted({f for r in rows for f in r["false"]})[:50]}
     (args.out / "summary.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")

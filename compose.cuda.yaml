@@ -1,0 +1,9 @@
+# Use after compose.yaml and compose.neural.yaml; NVIDIA Container Toolkit required.
+services:
+  gabarit:
+    image: gabarit:cuda
+    build:
+      args:
+        WITH_NEURAL: "1"
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu128
+    gpus: all

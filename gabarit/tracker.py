@@ -46,6 +46,7 @@ class Track:
     resolved_points: int = 0
     level_height: tuple = ()
     wide_body_history: list = field(default_factory=list)
+    strong_history: list = field(default_factory=list)
 
     def public(self) -> dict:
         c = self.cand.public()
@@ -114,6 +115,16 @@ class Tracker:
             if self._low_body(t.cand):
                 return tc.low_body_confirm_window, tc.low_body_confirm_hits
             return tc.low_confirm_window, tc.low_confirm_hits
+        supported = (getattr(self.cfg.models, "component_support_confirmation", False)
+                     and self.cfg.models.component_policy == "assist"
+                     and "gabarit_component_supported" in t.cand.reasons
+                     and t.cand.rejected is None and not t.cand.transparent
+                     and not t.cand.single_beam and self._resolved(t.cand))
+        if supported:
+            # Calibrated objectness supplements unchanged geometry and
+            # spatial association; one scan can never confirm a body.
+            hits = max(2, self.cfg.models.component_min_hits)
+            return max(tc.confirm_window, hits + 1), hits
         if t.s > tc.far_distance:
             return tc.far_confirm_window, tc.far_confirm_hits
         return tc.confirm_window, tc.confirm_hits
@@ -144,15 +155,24 @@ class Tracker:
         return self._low_body(c) and c.n_points >= 12 and c.size[1] >= .25
 
     def _weak_continuation(self, t: Track, c: Candidate) -> bool:
-        """Lower the score threshold only for an already confirmed, resolved body.
+        """Associate a resolved body across a temporarily weak scalar score.
 
-        Sparse reflections cannot create a new track here. The lower score
-        may come from transparency or a less certain path; dense multi-beam
-        measurements must still match the predicted object's extent closely.
+        Weak reflections cannot create a track here. Pending confirmation
+        still needs multiple strong observations; an established body's
+        extent must match spatially before a weak observation can renew it.
         """
-        if (not t.confirmed or c.rejected != 'low_score' or c.n_points < 12 or c.n_rings < 4
-                or c.score < .5*self.cfg.detection.min_score):
+        if c.rejected != 'low_score' or c.score < .5*self.cfg.detection.min_score:
             return False
+        if t.confirmed:
+            if c.n_points < 12 or c.n_rings < 4:
+                return False
+        else:
+            # A resolved pending body may bridge a temporarily weak score.
+            # Weak observations cannot start a track and confirmation below
+            # still requires independent strong measurements in the window.
+            if (t.cand.low or c.low or not self._resolved(t.cand) or
+                    c.n_points < max(4, int(math.ceil(.25*t.cand.n_points))) or c.n_rings < 4):
+                return False
         old = t.cand
         lateral_gap = max(c.d_min-old.d_max, old.d_min-c.d_max, 0.0)
         vertical_overlap = min(c.h_max, old.h_max)-max(c.h_min, old.h_min)
@@ -164,6 +184,17 @@ class Tracker:
 
     def _shape_compatible(self, t: Track, c: Candidate) -> bool:
         if not t.confirmed:
+            old = t.cand
+            # A pending low body must not lend its broad transverse evidence
+            # to a different narrow rail-head echo. Both can be close in s/d
+            # while their sampled body widths are physically incompatible.
+            # Already confirmed objects retain their separate occlusion rules.
+            if old.low and c.low and min(old.n_points, c.n_points) >= 12:
+                previous_width, current_width = old.size[1], c.size[1]
+                minimum = self.cfg.detection.low_min_width
+                if (min(previous_width, current_width) < minimum <= max(previous_width, current_width)
+                        and max(previous_width, current_width) > 2.5 * max(min(previous_width, current_width), .02)):
+                    return False
             return True
         old = t.cand
         if t.resolved_points >= 100 and c.n_points < max(12,.1*t.resolved_points):
@@ -380,8 +411,11 @@ class Tracker:
             used_c.add(ci)
             t = self.tracks[ti]
             c = good[ci]
+            strong = c.rejected is None
             if c.rejected == 'low_score':
-                c = replace(c, rejected=None, reasons=c.reasons+['продолжение подтверждённого тела по плотным согласованным измерениям'])
+                reason = ('продолжение подтверждённого тела по плотным согласованным измерениям' if t.confirmed
+                          else 'согласованное наблюдение кандидата с временно низкой оценкой')
+                c = replace(c, rejected=None, reasons=c.reasons+[reason])
             # objects may move on their own (a walking person): follow the measurement
             innov = c.s_near - t.s
             t.v_rel = float(np.clip(t.v_rel + 0.4 * innov, -0.4, 0.4))
@@ -400,6 +434,7 @@ class Tracker:
                 t.resolved_points = c.n_points
             t.score = 0.6 * t.score + 0.4 * c.score
             t.history.append(1)
+            t.strong_history.append(int(strong))
             t.body_history.append(int(self._low_body(c)))
             t.wide_body_history.append(int(self._wide_low_body(c)))
             t.strict_history.append(int(c.strict_rail_support))
@@ -409,6 +444,7 @@ class Tracker:
             t.age += 1
             if ti not in used_t:
                 t.history.append(0)
+                t.strong_history.append(0)
                 t.body_history.append(0)
                 t.wide_body_history.append(0)
                 t.strict_history.append(0)
@@ -418,6 +454,7 @@ class Tracker:
             # 12/16-scan defaults. Truncating earlier silently made valid
             # longer confirmation policies impossible to satisfy.
             del t.history[:-history_limit]
+            del t.strong_history[:-history_limit]
             del t.body_history[:-history_limit]
             del t.wide_body_history[:-history_limit]
             del t.strict_history[:-history_limit]
@@ -430,7 +467,8 @@ class Tracker:
                                      zip(t.body_history[-win:],t.strict_history[-win:])) >= min(2,need)
             strict |= body and sum(t.wide_body_history[-win:]) >= need
             stable = t.s <= tc.far_distance or len(t.lat_hist) < 3 or float(np.std(t.lat_hist[-need:])) < tc.far_lateral_std
-            if not t.confirmed and sum(recent) >= need and stable and strict and self._has_body_extent(t):
+            strong = sum(t.strong_history[-win:]) >= min(2,need)
+            if not t.confirmed and sum(recent) >= need and strong and stable and strict and self._has_body_extent(t):
                 t.confirmed = True
                 t.confirmed_at_s = t.s
                 t.confirmed_frame = self.frame
@@ -461,6 +499,7 @@ class Tracker:
                       body_history=[int(self._low_body(c))],strict_history=[int(c.strict_rail_support)], width_seen=c.d_max-c.d_min,
                       resolved_history=[int(self._resolved(c))],height_seen=c.size[2])
             t.wide_body_history = [int(self._wide_low_body(c))]
+            t.strong_history = [1]
             if self._resolved(c):
                 t.resolved_size = (*c.size[:2],max(c.size[2],t.resolved_size[2] if t.resolved_size else 0.))
                 t.resolved_points = c.n_points

@@ -26,11 +26,15 @@ workflows:
               OPENBLAS_NUM_THREADS: "1"
               OMP_NUM_THREADS: "1"
             script:
+              - apt-get update -qq && apt-get install -y --no-install-recommends nodejs g++ > /dev/null
+              - node --version
+              - node -e "if (+process.versions.node.split('.')[0] < 18) process.exit(1)"
               - pip install --no-cache-dir -q -r requirements-dev.txt
               - mkdir -p results
               # no pipes (| tee) here: a pipe would hide a failing command
               - python -m pytest -q tests > results/tests.txt 2>&1 || { cat results/tests.txt; exit 1; }
               - cat results/tests.txt
+              - python scripts/regression_suite.py --help > results/regression-command.txt
               - python scripts/make_sample_bag.py work/sample
               - python -m gabarit run work/sample > results/run.txt
               - cat results/run.txt

@@ -1,0 +1,8 @@
+{
+  "source_recording": "finalist_20261018/new_data",
+  "source_frame": 8922,
+  "coordinates": "estimated rail-head height in levelled sensor frame",
+  "purpose": "Reproduce an unmeasured quadratic vertical tail before temporal runaway",
+  "not_ground_truth": true,
+  "sha256": "ec5f21ba15c4a8a1470443454060cccdd60e9c7bb09a7c70237cd685f37d02d6"
+}
